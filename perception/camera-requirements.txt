@@ -1,0 +1,2 @@
+# Optional Gemini camera capture; installs the SDK 2 Python wrapper.
+pyorbbecsdk2==2.1.2

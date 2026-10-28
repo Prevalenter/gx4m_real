@@ -1,0 +1,17 @@
+{
+  "FoundationPose": {
+    "repository": "https://github.com/NVlabs/FoundationPose",
+    "commit": "a1b694b83e633c2cb6115b9063d940a687759392"
+  },
+  "pytorch3d": {
+    "repository": "https://github.com/facebookresearch/pytorch3d",
+    "version": "0.7.9",
+    "commit": "33824be3cbc87a7dd1db0f6a9a9de9ac81b2d0ba"
+  },
+  "nvdiffrast": {
+    "repository": "https://github.com/NVlabs/nvdiffrast",
+    "version": "0.3.3",
+    "commit": "729261dc64c4241ea36efda84fbf532cc8b425b8",
+    "local_change": "Preserve explicit TORCH_CUDA_ARCH_LIST via setdefault, allowing compilation with GPUs hidden."
+  }
+}

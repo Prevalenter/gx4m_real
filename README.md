@@ -1,5 +1,7 @@
 # DexLong Gear3 Split Assembly
 
+实物工具：[机械臂关节控制与可视化](control/README.md)（GX7＋GX4M 模型，默认模拟模式，仅控制右臂 7 个关节）；[齿轮感知与实时跟踪](perception/README.md)。
+
 把 `experiment/dexlong_gear3` 的三齿轮轮系拆成三个步骤，逐个训练三个齿轮的安装：
 
 | 步骤 | 抓取并安装 | 板上已装好（铰链固定，可自由转动） | 任务 ID | 编辑器 | TensorBoard |

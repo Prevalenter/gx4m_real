@@ -1,0 +1,6 @@
+{
+  "source_project": "/home/yuanshi/data/lx/tracker",
+  "source_subdirectory": "vendor/libgx7",
+  "source_commit": "0716483acc969755ea835b0b4e2307c4feb366cb",
+  "note": "Runtime copy; no dependency on the source checkout. Local additions: Robot.set_released() and owner-thread disabled feedback polling; locked position/timestamp snapshots for RGB-to-joint alignment."
+}

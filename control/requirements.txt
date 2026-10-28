@@ -1,0 +1,6 @@
+numpy>=1.24,<2
+PyYAML>=6,<7
+pyserial>=3.5,<4
+viser>=1.0,<2
+yourdfpy>=0.0.58,<0.1
+Pillow>=10,<14

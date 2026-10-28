@@ -1,0 +1,19 @@
+name: foundationpose
+channels:
+  - conda-forge
+  - nvidia
+  - nodefaults
+dependencies:
+  - python=3.11
+  - pip
+  - setuptools<81
+  - wheel
+  - cmake=3.31
+  - ninja
+  - eigen=3.4
+  - boost-cpp=1.85
+  - pybind11=2.13
+  - gcc_linux-64=12
+  - gxx_linux-64=12
+  - cuda-toolkit=12.4
+  - cuda-version=12.4

@@ -1,0 +1,8 @@
+opencv-contrib-python>=4.8,<4.12
+numpy>=1.24,<2
+scipy>=1.10,<2
+viser>=1.0,<2
+yourdfpy>=0.0.58,<0.1
+Pillow>=10,<14
+# ZED 相机：先装 ZED SDK，再运行 SDK 自带的 get_python_api.py 安装 pyzed（不要 pip install pyzed）
+# ROS 模式（可选）：rospy + sensor_msgs（ROS Noetic，可用 RoboStack conda 安装）

@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gx4m_real"
+version = "0.1.0"
+description = "Shared real-robot code for GX7 + GX4M: arm driver, cameras, recording"
+requires-python = ">=3.10"
+# Dependencies stay in each app's requirements.txt: the apps use separate environments
+# (e.g. numpy<2 for control, numpy 2 for perception). Install with: pip install --no-deps -e .
+dependencies = []
+
+[tool.setuptools.packages.find]
+include = ["gx4m_real*"]

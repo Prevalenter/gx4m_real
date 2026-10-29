@@ -8,3 +8,6 @@ outputs/
 # Orbbec captures and SDK logs
 captures/
 Log/
+
+# MuJoCo warning log
+MUJOCO_LOG.TXT

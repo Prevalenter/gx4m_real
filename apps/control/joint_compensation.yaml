@@ -1,0 +1,23 @@
+version: 1
+joints:
+  joint1:
+    direction: -1
+    offset_deg: 0.0
+  joint2:
+    direction: 1
+    offset_deg: 0.0
+  joint3:
+    direction: -1
+    offset_deg: 0.0
+  joint4:
+    direction: 1
+    offset_deg: 0.0
+  joint5:
+    direction: -1
+    offset_deg: 0.0
+  joint6:
+    direction: -1
+    offset_deg: 0.0
+  joint7:
+    direction: -1
+    offset_deg: 0.0

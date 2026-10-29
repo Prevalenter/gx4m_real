@@ -80,6 +80,10 @@ class AlignmentTests(unittest.TestCase):
                 self.assertFalse(result['alignment_valid'])
                 self.assertIsNone(result['positions_rad'])
         self.assertTrue(history.align(1., timeout=0)['alignment_valid'])
+        exact = history.align(2., timeout=0)
+        self.assertTrue(exact['alignment_valid'])
+        self.assertEqual(exact['positions_rad'], [1.] * 7)
+        self.assertEqual(exact['joint_time_offsets_sec'], [0., 0.])
 
     def test_sdk_feedback_snapshot_is_coherent(self):
         from libgx7.robot.robot import Robot
@@ -133,6 +137,11 @@ class RecorderTests(unittest.TestCase):
         self.assertEqual(summary['stop_reason'], 'completed')
         self.assertIsNone(summary['error'])
         self.assertEqual(summary['frames'], len(frames))
+        saved_image, saved_record = recorder.latest_recorded()
+        self.assertEqual(saved_record, frames[-1])
+        self.assertEqual(saved_image.received_at, saved_record['timestamp_monotonic'])
+        self.assertEqual(saved_image.sequence, saved_record['camera_sequence'])
+        np.testing.assert_array_equal(saved_image.rgb, np.array(Image.open(output / saved_record['rgb_path'])))
         self.assertTrue((output / 'joints.jsonl').stat().st_size)
         self.assertEqual((output / 'source_trajectory.json').read_text(), self.trajectory.read_text())
         metadata = json.loads((output / 'session.json').read_text())
@@ -167,6 +176,7 @@ class RecorderTests(unittest.TestCase):
             recorder.stop('capture_failed')
         self.assertEqual(recorder.error, 'disk full')
         self.assertEqual(recorder.frames, 0)
+        self.assertIsNone(recorder.latest_recorded())
 
     def test_existing_output_is_never_overwritten(self):
         recorder = self.make_recorder(FakeCamera())
@@ -226,6 +236,66 @@ class PlaybackCaptureTests(unittest.TestCase):
         self.assertEqual(self.app.driver.mode, 'hold')
         self.assertIsNone(self.app.driver.playback)
         self.assertNotEqual(self.app.capture_path.value, str(self.root / 'capture'))
+
+    def start_manual(self):
+        self.app.record_path.value = str(self.root / 'manual.json')
+        self.app.start_recording()
+
+    def test_manual_recording_saves_rgb_and_previews_matching_joints(self):
+        self.start_manual()
+        def ready():
+            self.app.update()
+            return self.app.capture.aligned_frames >= 3
+        wait_until(ready)
+        self.assertEqual(self.app.driver.mode, 'recording')
+        self.assertTrue(self.app.camera_image.visible)
+        self.assertTrue(self.app.recorded_image.visible)
+        self.assertIn('对齐有效', self.app.recorded_status.content)
+        self.assertIn('无力录制同步采集中', self.app.camera_status.content)
+        self.app.save_recording()
+        self.app.refresh()
+        self.assertEqual(self.app.driver.mode, 'released')
+        self.assertFalse(self.app.capture.active)
+        self.assertTrue(self.app.recorded_image.visible)
+        self.assertTrue((self.root / 'manual.json').is_file())
+        self.assertTrue((self.root / 'capture' / 'frames.jsonl').is_file())
+        session = json.loads((self.root / 'capture' / 'session.json').read_text())
+        self.assertEqual(session['capture_mode'], 'recording')
+        self.assertEqual(session['joint_recording_path'], str(self.root / 'manual.json'))
+
+    def test_manual_capture_failure_saves_trajectory_without_enabling_arm(self):
+        with patch('app.SimulatedRGBCamera', return_value=FakeCamera(fail_after=2)):
+            self.start_manual()
+        wait_until(lambda: self.app.capture.snapshot()['error'])
+        self.app.update()
+        self.assertEqual(self.app.driver.mode, 'released')
+        self.assertFalse(self.app.capture.active)
+        self.assertTrue((self.root / 'manual.json').is_file())
+        summary = json.loads((self.root / 'capture' / 'summary.json').read_text())
+        self.assertEqual(summary['stop_reason'], 'capture_failed')
+
+    def test_manual_startup_failure_prevents_releasing_arm(self):
+        with patch('app.SimulatedRGBCamera', return_value=FakeCamera(fail_after=0)):
+            with self.assertRaisesRegex(RuntimeError, 'camera disconnected'):
+                self.start_manual()
+        self.assertEqual(self.app.driver.mode, 'hold')
+        self.assertFalse(self.app.driver.snapshot()['recording'])
+
+    def test_manual_disconnect_finalizes_images_and_trajectory(self):
+        self.start_manual()
+        self.app.disconnect()
+        self.assertFalse(self.app.capture.active)
+        self.assertFalse(self.app.driver.snapshot()['connected'])
+        self.assertTrue((self.root / 'manual.json').is_file())
+        self.assertTrue((self.root / 'capture' / 'summary.json').is_file())
+
+    def test_joint_only_recording_does_not_open_camera(self):
+        self.app.record_capture_enabled.value = False
+        with patch('app.SimulatedRGBCamera') as camera:
+            self.start_manual()
+            self.app.save_recording()
+        camera.assert_not_called()
+        self.assertIsNone(self.app.capture)
 
 
 if __name__ == '__main__':

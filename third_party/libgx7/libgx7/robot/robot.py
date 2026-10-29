@@ -141,16 +141,16 @@ class Robot:
     def _poll_released(self):
         with self.command_lock:
             if self._release_requested:
-                # Disable replies contain fresh encoder feedback. Never send a
-                # position command or an enable frame during released polling.
-                self.update_status(self.robot_motors.disable_all())
-                self._motors_released = True
+                if not self._motors_released:
+                    self.update_status(self.robot_motors.disable_all())
+                    self._motors_released = True
+                self.update_status(self.robot_motors.read_feedback_all())
                 self._release_applied.set()
                 return True
             if self._motors_released:
                 # Refresh and seed the current pose before re-enabling; a
                 # previously submitted target must never survive this switch.
-                self.update_status(self.robot_motors.disable_all())
+                self.update_status(self.robot_motors.read_feedback_all())
                 self.setJPVTs(self.getJP(), self.pvt_control_velocities,
                              self.pvt_control_torques)
                 self.update_status(self.robot_motors.enable_all())

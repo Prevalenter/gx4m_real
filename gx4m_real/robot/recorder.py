@@ -1,4 +1,4 @@
-"""RGB and measured-joint capture during playback; no camera opens on import."""
+"""RGB and measured-joint capture during recording or playback."""
 from bisect import bisect_left
 from collections import deque
 from datetime import datetime
@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 
-from ..camera.orbbec import OrbbecColorCamera
+from ..camera.process import ProcessColorCamera
 
 from .config import ARM_JOINTS
 
@@ -41,6 +41,8 @@ class JointHistory:
             return {'alignment_valid': False, 'alignment_reason': 'no bracketing feedback',
                     'positions_rad': None}
         before, after = samples[max(0, i - 1)], samples[i]
+        if stamps[i] == timestamp:
+            before = after
         t0, t1 = before['timestamp_monotonic'], after['timestamp_monotonic']
         offsets = [timestamp - t0, t1 - timestamp]
         valid = max(offsets) <= self.max_gap
@@ -58,7 +60,7 @@ class JointHistory:
 class PlaybackRecorder:
     """Camera/disk and joint sampling run outside the arm command loop."""
 
-    def __init__(self, joint_reader, *, camera_factory=OrbbecColorCamera, sample_hz=100, max_gap=.05):
+    def __init__(self, joint_reader, *, camera_factory=ProcessColorCamera, sample_hz=100, max_gap=.05):
         self.joint_reader = joint_reader
         self.camera_factory = camera_factory
         self.sample_hz = sample_hz
@@ -73,6 +75,8 @@ class PlaybackRecorder:
         self.error = None
         self.frames = self.aligned_frames = self.joint_samples = 0
         self.started_at = None
+        self._latest_frame = None
+        self._latest_recorded = None
 
     def start(self, directory, trajectory_path, metadata):
         from PIL import Image  # Check the image dependency before moving the arm.
@@ -85,8 +89,9 @@ class PlaybackRecorder:
         try:
             self.camera.open()
             # Verify that actual images can be read before playback begins.
-            self.camera.read()
-            shutil.copyfile(trajectory_path, self.path / 'source_trajectory.json')
+            self._latest_frame = self.camera.read()
+            if trajectory_path is not None:
+                shutil.copyfile(trajectory_path, self.path / 'source_trajectory.json')
             self.started_at = time.monotonic()
             self.session = {
                 'version': 1, 'created_at': datetime.now(ZoneInfo('Asia/Shanghai')).isoformat(),
@@ -139,6 +144,8 @@ class PlaybackRecorder:
                 frame = self.camera.read(timeout=1.)
                 if self.stop_frames.is_set():
                     break
+                with self.lock:
+                    self._latest_frame = frame
                 aligned = self.history.align(frame.received_at)
                 filename = f'rgb/{self.frames:06d}.png'
                 Image.fromarray(frame.rgb).save(self.path / filename)
@@ -152,6 +159,8 @@ class PlaybackRecorder:
                 with self.lock:
                     self.frames += 1
                     self.aligned_frames += int(aligned['alignment_valid'])
+                    # Publish image and alignment together only after both files are written.
+                    self._latest_recorded = (frame, record)
         except Exception as exc:
             self._fail(exc)
         finally:
@@ -165,6 +174,15 @@ class PlaybackRecorder:
             return {'active': self.active, 'error': self.error, 'frames': self.frames,
                     'aligned_frames': self.aligned_frames, 'joint_samples': self.joint_samples,
                     'path': str(self.path) if self.path else None}
+
+    def latest_frame(self):
+        with self.lock:
+            return self._latest_frame
+
+    def latest_recorded(self):
+        """Return the last saved image and its matching manifest entry atomically."""
+        with self.lock:
+            return self._latest_recorded
 
     def stop(self, reason='stopped'):
         self.stop_frames.set()

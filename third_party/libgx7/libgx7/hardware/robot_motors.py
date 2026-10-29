@@ -76,6 +76,19 @@ class RobotMotors:  # https://gl1po2nscb.feishu.cn/wiki/VYrlwHI7liHzXIkx0s0cUOVd
             self.motor_types, motor_name, feedback_frame
         )
 
+    def read_motor_feedback(self, motor_id):
+        motor_name = self._get_motor_name_by_id(motor_id)
+        response = self.can.send_frame(
+            self.can_channel, 0x7FF, [motor_id, 0, 0xCC, 0, 0, 0, 0, 0]
+        )
+        feedback = extract_feedback_frame(self.motor_types, motor_name, response)
+        if feedback["id"] != motor_id:
+            raise RuntimeError(f"Motor {motor_id} feedback ID mismatch")
+        return feedback
+
+    def read_feedback_all(self):
+        return [self.read_motor_feedback(motor_id) for motor_id in self.motor_ids]
+
     def enable_motor(self, id):
         motor_name = self._get_motor_name_by_id(id)
         feedback_frame = self.can.send_frame(

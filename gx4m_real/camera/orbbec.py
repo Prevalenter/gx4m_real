@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import io
 import math
+from functools import lru_cache
 import threading
 import time
 
@@ -31,11 +32,17 @@ def sdk():
     return pyorbbecsdk
 
 
-def open_device(index: int = 0, serial: str | None = None):
-    """Device by serial number if given, else by index. Lowers the SDK log level to errors."""
+@lru_cache(maxsize=1)
+def sdk_context():
+    """Keep the shared SDK context alive while its devices and streams are in use."""
     ob = sdk()
     ob.Context.set_logger_level(ob.OBLogLevel.ERROR)
-    devices = ob.Context().query_devices()
+    return ob.Context()
+
+
+def open_device(index: int = 0, serial: str | None = None):
+    """Device by serial number if given, else by index. Lowers the SDK log level to errors."""
+    devices = sdk_context().query_devices()
     if serial:
         return devices.get_device_by_serial_number(serial)
     if not 0 <= index < devices.get_count():

@@ -7,7 +7,7 @@ import tempfile
 import json
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 import numpy as np
 
@@ -208,6 +208,7 @@ class ControlTests(unittest.TestCase):
         raw['model']['urdf'] = str(self.config.urdf)
         raw['model']['initial_pose'] = str(ROOT.parents[1] / 'tasks/dexlong_gear3/config/initial_pose.json')
         raw['arm']['motor_config'] = str(self.config.motor_config)
+        raw['joint_compensation'] = str(self.config.compensation_path)
         raw['arm']['can_device_serial'] = ''
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'config.yaml'
@@ -326,21 +327,62 @@ class ControlTests(unittest.TestCase):
         robot.pvt_control_velocities = [.25] * 7
         robot.pvt_control_torques = [.85] * 7
         events = []
-        q = self.config.initial_position
+        measured = self.config.initial_position.copy()
+        cached = measured.copy()
+
+        def read_feedback():
+            events.append('query')
+            return measured.copy()
+
+        def update_status(positions):
+            if positions is not None:
+                cached[:] = positions
+
         robot.robot_motors = types.SimpleNamespace(
             disable_all=lambda: events.append('disable'),
+            read_feedback_all=read_feedback,
             enable_all=lambda: events.append('enable'))
-        robot.update_status = lambda _: None
-        robot.getJP = lambda: q.copy()
+        robot.update_status = update_status
+        robot.getJP = lambda: cached.copy()
         robot.setJPVTs = lambda positions, *_: events.append(('seed', positions))
         self.assertTrue(robot._poll_released())
+        measured[:] += .01
         self.assertTrue(robot._poll_released())
-        self.assertEqual(events, ['disable', 'disable'])
+        self.assertEqual(events, ['disable', 'query', 'query'])
+        np.testing.assert_allclose(robot.getJP(), measured)
+        measured[:] += .01
         robot._release_requested = False
         self.assertFalse(robot._poll_released())
-        self.assertEqual(events[-3], 'disable')
-        np.testing.assert_allclose(events[-2][1], q)
+        self.assertEqual(events[-3], 'query')
+        np.testing.assert_allclose(events[-2][1], measured)
         self.assertEqual(events[-1], 'enable')
+        robot._release_requested = True
+        self.assertTrue(robot._poll_released())
+        self.assertEqual(events[-2:], ['disable', 'query'])
+        robot._release_requested = False
+        robot.robot_motors.read_feedback_all = Mock(side_effect=TimeoutError('no reply'))
+        before = list(events)
+        with self.assertRaises(TimeoutError):
+            robot._poll_released()
+        self.assertEqual(events, before)
+        self.assertTrue(robot._motors_released)
+
+    def test_sdk_feedback_queries_only_and_validates_motor_id(self):
+        from libgx7.hardware.robot_motors import RobotMotors
+        adapter = Mock(spec=['send_frame'])
+        adapter.send_frame.side_effect = lambda channel, frame, payload: [
+            payload[0], 0x80, 0x00, 0x7F, 0xF7, 0xFF, 25, 25]
+        motors = RobotMotors(adapter, self.config.can_channel, str(self.config.motor_config))
+        feedback = motors.read_feedback_all()
+        self.assertEqual([sample['id'] for sample in feedback], motors.motor_ids)
+        self.assertTrue(all(np.isfinite(sample['position']) for sample in feedback))
+        self.assertEqual(adapter.send_frame.call_args_list, [
+            call(self.config.can_channel, 0x7FF, [motor_id, 0, 0xCC, 0, 0, 0, 0, 0])
+            for motor_id in motors.motor_ids])
+        adapter.send_frame.side_effect = None
+        adapter.send_frame.return_value = [2, 0x80, 0x00, 0x7F, 0xF7, 0xFF, 25, 25]
+        with self.assertRaisesRegex(RuntimeError, 'feedback ID mismatch'):
+            motors.read_motor_feedback(1)
 
 
 if __name__ == '__main__':

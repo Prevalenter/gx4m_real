@@ -1,10 +1,12 @@
 """Configuration shared by the seven-joint driver and the viewer."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
 
 import numpy as np
 import yaml
+
+from .compensation import JointCompensation
 
 ARM_JOINTS = tuple(f'joint{i}' for i in range(1, 8))
 
@@ -31,6 +33,8 @@ class Config:
     can_retry_delay_sec: float
     lower: np.ndarray
     upper: np.ndarray
+    compensation_path: Path | None = None
+    compensation: JointCompensation = field(default_factory=JointCompensation)
 
     @property
     def initial_position(self):
@@ -52,10 +56,14 @@ def load_config(path: Path) -> Config:
     if not np.isfinite([lower, upper]).all() or np.any(lower >= upper):
         raise ValueError('Motor limits must be finite and ordered')
     initial = json.loads(resolve(model['initial_pose']).read_text())
+    compensation_path = resolve(raw.get('joint_compensation', 'joint_compensation.yaml'))
+    compensation = (JointCompensation.load(compensation_path)
+                    if compensation_path.exists() or 'joint_compensation' in raw else JointCompensation())
     cfg = Config(host=str(web['host']), port=int(web['port']), urdf=resolve(model['urdf']),
                  motor_config=motor_config, initial_joints=initial['joint_positions'],
                  base_position=tuple(initial['base_position']), base_wxyz=tuple(initial['base_wxyz']),
-                 lower=lower, upper=upper, **arm_without_path(arm))
+                 lower=lower, upper=upper, compensation_path=compensation_path,
+                 compensation=compensation, **arm_without_path(arm))
     if not cfg.urdf.is_file() or not 1 <= cfg.port <= 65535:
         raise ValueError('Invalid URDF path or server port')
     if cfg.can_channel not in (0, 1) or not cfg.can_device_serial.strip():

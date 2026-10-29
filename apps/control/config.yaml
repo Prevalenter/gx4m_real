@@ -1,6 +1,7 @@
 web:
   host: 127.0.0.1
   port: 8086
+joint_compensation: joint_compensation.yaml
 model:
   urdf: ../../asset/gx7_right/urdf/gx7_right_gx4m_cam_xl330.urdf
   initial_pose: ../../tasks/dexlong_gear3/config/initial_pose.json

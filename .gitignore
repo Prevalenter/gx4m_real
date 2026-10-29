@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+runtime/
+outputs/
+
+# Orbbec captures and SDK logs
+captures/
+Log/

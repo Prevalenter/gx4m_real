@@ -1,0 +1,24 @@
+{
+    "parent_link": "base_link",
+    "offset_pos": [
+        0.046184011519873086,
+        0.005110730605090451,
+        -0.0038596646802340207
+    ],
+    "offset_rot_wxyz": [
+        0.7070518140750296,
+        0.008816587390238129,
+        -0.008816587390237787,
+        -0.7070518140750298
+    ],
+    "convention": "ros",
+    "focal_length": 1.88,
+    "focus_distance": 0.3,
+    "horizontal_aperture": 3.6,
+    "clipping_range": [
+        0.04,
+        0.6
+    ],
+    "width": 640,
+    "height": 480
+}

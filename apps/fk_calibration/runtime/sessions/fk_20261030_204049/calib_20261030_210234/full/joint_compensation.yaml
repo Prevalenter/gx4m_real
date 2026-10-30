@@ -1,0 +1,23 @@
+version: 1
+joints:
+  joint1:
+    direction: -1
+    offset_deg: 0.0
+  joint2:
+    direction: 1
+    offset_deg: 1.5785269899841712
+  joint3:
+    direction: -1
+    offset_deg: -0.40984639905296744
+  joint4:
+    direction: 1
+    offset_deg: 1.011559837059293
+  joint5:
+    direction: -1
+    offset_deg: -2.742695767400811
+  joint6:
+    direction: -1
+    offset_deg: 0.011873287618948321
+  joint7:
+    direction: -1
+    offset_deg: 0.0

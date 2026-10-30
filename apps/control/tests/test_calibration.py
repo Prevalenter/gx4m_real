@@ -262,6 +262,9 @@ class PlaybackCaptureTests(unittest.TestCase):
         session = json.loads((self.root / 'capture' / 'session.json').read_text())
         self.assertEqual(session['capture_mode'], 'recording')
         self.assertEqual(session['joint_recording_path'], str(self.root / 'manual.json'))
+        compensation = self.app.config.compensation
+        self.assertEqual(session['joint_compensation'], {'directions': list(compensation.directions),
+                                                         'offsets_deg': list(compensation.offsets_deg)})
 
     def test_manual_capture_failure_saves_trajectory_without_enabling_arm(self):
         with patch('app.SimulatedRGBCamera', return_value=FakeCamera(fail_after=2)):

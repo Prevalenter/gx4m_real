@@ -256,6 +256,10 @@ class ControlApp:
                 'robot_urdf': str(self.config.urdf),
                 'base_position': self.config.base_position, 'base_wxyz': self.config.base_wxyz,
                 'fixed_model_joints': self.config.initial_joints,
+                # positions_rad stay raw motor angles; offline FK needs the mapping active at capture.
+                'joint_positions': 'raw motor radians; model = direction * motor + offset_deg',
+                'joint_compensation': {'directions': [int(d) for d in self.config.compensation.directions],
+                                       'offsets_deg': [float(v) for v in self.config.compensation.offsets_deg]},
             })
         except Exception:
             if self.capture.error:

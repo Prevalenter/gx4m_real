@@ -1,10 +1,15 @@
-"""Read control/runtime/calibration sessions without importing robot hardware."""
+"""Read control/runtime/calibration sessions without importing robot hardware.
+
+Recorded positions_rad are raw motor angles. They are mapped to model angles with the joint
+compensation before FK; loaded frames keep the raw values as motor_positions_rad.
+"""
 import json
 from pathlib import Path
 
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+from gx4m_real.robot.compensation import JointCompensation
 from robot import UrdfChainFK
 
 HERE = Path(__file__).resolve().parent
@@ -61,13 +66,50 @@ def camera_parameters(camera):
     return K, dist.astype(float), tuple(int(v) for v in size)
 
 
-def load_session(directory, *, urdf=None, base='base_link', tip='Link7', allow_synthetic=False):
+def session_compensation(metadata, override=None):
+    """Mapping for this recording: an explicit file (e.g. newer FK-calibrated offsets) or the recorded one."""
+    recorded = metadata.get('joint_compensation')
+    if recorded is not None:
+        recorded = JointCompensation(tuple(recorded['directions']), tuple(recorded['offsets_deg']))
+    if override is None:
+        if recorded is None:
+            raise ValueError('Session has no joint_compensation (recorded before it was saved); '
+                             'pass --joint-compensation with the file active during capture')
+        return recorded, 'session'
+    compensation = JointCompensation.load(override) if isinstance(override, (str, Path)) else override
+    if recorded is not None and compensation.directions != recorded.directions:
+        raise ValueError('Joint directions differ from those recorded with the session; wrong compensation file?')
+    return compensation, str(override) if isinstance(override, (str, Path)) else 'override'
+
+
+def load_joint_log(directory):
+    path = directory / 'joints.jsonl'
+    if not path.is_file():
+        return None
+    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    return (np.array([r['timestamp_monotonic'] for r in rows], dtype=float),
+            np.array([r['positions_rad'] for r in rows], dtype=float).reshape(-1, 7))
+
+
+def joint_motion(log, timestamp, window):
+    """Largest joint peak-to-peak (rad) within ±window of the image time, or None if not covered."""
+    stamps, positions = log
+    lo, hi = np.searchsorted(stamps, [timestamp - window, timestamp + window], side='left')
+    if hi - lo < 2 or stamps[lo] > timestamp or stamps[hi - 1] < timestamp:
+        return None
+    return float(np.ptp(positions[lo:hi], axis=0).max())
+
+
+def load_session(directory, *, urdf=None, base='base_link', tip='Link7', allow_synthetic=False,
+                 compensation=None, still_window=.15):
     directory = Path(directory).expanduser().resolve()
     metadata = json.loads((directory / 'session.json').read_text())
     if metadata.get('version') != 1 or metadata.get('joint_names') != JOINTS or metadata.get('joint_units') != 'rad':
         raise ValueError('Expected playback session v1 with joint1..joint7 in radians')
     if (metadata.get('mock') or metadata['camera'].get('synthetic')) and not allow_synthetic:
         raise ValueError('Synthetic session: use --allow-synthetic only for synthetic self-tests')
+    compensation, compensation_source = session_compensation(metadata, compensation)
+    joint_log = load_joint_log(directory)
     K, dist, size = camera_parameters(metadata['camera'])
     path = Path(urdf or metadata.get('robot_urdf', DEFAULT_URDF)).expanduser()
     if not path.is_absolute():
@@ -97,11 +139,16 @@ def load_session(directory, *, urdf=None, base='base_link', tip='Link7', allow_s
             raise ValueError('RGB image path must stay inside the recording directory')
         row = {**row, 'image_path': str(image)}
         if row.get('alignment_valid') is True:
-            q = np.asarray(row.get('positions_rad'), dtype=float)
-            if q.shape != (7,) or not np.isfinite(q).all():
+            motor = np.asarray(row.get('positions_rad'), dtype=float)
+            if motor.shape != (7,) or not np.isfinite(motor).all():
                 raise ValueError(f'Invalid aligned joints for frame {frame_id}')
-            row['T_base_flange'] = fk.fk(q.tolist()).tolist()
+            q = compensation.to_model(motor)
+            row.update(motor_positions_rad=motor.tolist(), positions_rad=q.tolist(),
+                       T_base_flange=fk.fk(q.tolist()).tolist(),
+                       joint_motion_rad=None if joint_log is None else joint_motion(joint_log, stamp, still_window))
         rows.append(row)
     return {'path': str(directory), 'metadata': metadata, 'K': K, 'dist': dist, 'size': size,
             'urdf': str(path.resolve()), 'base_link': base, 'tip_link': tip,
-            'T_world_base': world_base(metadata), 'frames': rows}
+            'T_world_base': world_base(metadata), 'frames': rows,
+            'compensation': compensation, 'compensation_source': compensation_source,
+            'has_joint_log': joint_log is not None}

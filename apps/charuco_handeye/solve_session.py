@@ -65,10 +65,16 @@ def solve_views(views, K, dist, mode, reject=3.):
 
 def calibrate_session(session_path, output, *, mode, urdf=None, base='base_link', tip='Link7',
                       square_length=SQUARE_LENGTH_M, min_interval=.25, min_rotation_deg=5.,
-                      min_translation=.01, reject=3., allow_synthetic=False):
-    if any(not np.isfinite(v) or v < 0 for v in (min_interval, min_rotation_deg, min_translation, reject)):
+                      min_translation=.01, reject=3., allow_synthetic=False, compensation=None,
+                      still_window=.15, max_still_motion_deg=.05):
+    if any(not np.isfinite(v) or v < 0 for v in (min_interval, min_rotation_deg, min_translation, reject,
+                                                  still_window, max_still_motion_deg)):
         raise ValueError('Sampling and rejection thresholds must be finite and nonnegative')
-    session = load_session(session_path, urdf=urdf, base=base, tip=tip, allow_synthetic=allow_synthetic)
+    session = load_session(session_path, urdf=urdf, base=base, tip=tip, allow_synthetic=allow_synthetic,
+                           compensation=compensation, still_window=still_window)
+    if max_still_motion_deg > 0 and not session['has_joint_log']:
+        raise ValueError('joints.jsonl is missing, so still frames cannot be selected; '
+                         'pass --max-still-motion-deg 0 to accept moving frames')
     detector = CharucoDetector(session['K'], session['dist'], square_length_m=square_length)
     all_points = np.asarray(detector.board.getChessboardCorners(), dtype=float)
     output = Path(output).expanduser().resolve()
@@ -81,6 +87,16 @@ def calibrate_session(session_path, output, *, mode, urdf=None, base='base_link'
         if row.get('alignment_valid') is not True:
             report['reason'] = 'invalid_alignment'
             continue
+        if max_still_motion_deg > 0:
+            # Software time alignment is only trustworthy while the arm is not moving.
+            motion = row['joint_motion_rad']
+            report['joint_motion_deg'] = None if motion is None else float(np.rad2deg(motion))
+            if motion is None:
+                report['reason'] = 'no_joint_samples'
+                continue
+            if np.rad2deg(motion) > max_still_motion_deg:
+                report['reason'] = 'moving'
+                continue
         if views:
             if row['timestamp_monotonic'] - views[-1]['timestamp_monotonic'] < min_interval:
                 report['reason'] = 'time_spacing'
@@ -117,6 +133,8 @@ def calibrate_session(session_path, output, *, mode, urdf=None, base='base_link'
             raise OSError('Failed to write detection overlay')
     (output / 'detection_report.json').write_text(json.dumps(reports, indent=2) + '\n')
     print(f"Selected {len(views)}/{len(reports)} frames; {dict(Counter(r['reason'] for r in reports))}", flush=True)
+    if not views and any(r.get('reason') == 'moving' for r in reports):
+        print('No still frames: add pauses to the playback trajectory, or raise --max-still-motion-deg', flush=True)
     solved = solve_views(views, session['K'], session['dist'], mode, reject)
     result = {'version': 1, 'mode': mode, 'method': solved['method'],
               'source_session': session['path'], 'synthetic': bool(session['metadata'].get('mock') or
@@ -125,6 +143,12 @@ def calibrate_session(session_path, output, *, mode, urdf=None, base='base_link'
               'T_world_base': session['T_world_base'].tolist(), 'urdf': session['urdf'],
               'base_link': base, 'tip_link': tip, 'joint_names': session['metadata']['joint_names'],
               'fixed_model_joints': session['metadata'].get('fixed_model_joints', {}),
+              'joint_compensation': {'directions': list(session['compensation'].directions),
+                                     'offsets_deg': list(session['compensation'].offsets_deg),
+                                     'source': session['compensation_source']},
+              'joint_positions': 'positions_rad are model angles after compensation; '
+                                 'motor_positions_rad are the recorded raw values',
+              'still_frames': {'window_sec': still_window, 'max_motion_deg': max_still_motion_deg},
               'board': {'squares_x': SQUARES_X, 'squares_y': SQUARES_Y, 'square_length_m': square_length,
                         'marker_ratio': MARKER_TO_SQUARE, 'dictionary': 'DICT_4X4_50'},
               'samples': [dict(views[i], residual=res) for i, res in zip(solved['indices'], solved['residuals'])],
@@ -171,12 +195,21 @@ def main():
     parser.add_argument('--min-rotation-deg', type=float, default=5.)
     parser.add_argument('--min-translation-m', type=float, default=.01)
     parser.add_argument('--reject', type=float, default=3.)
+    parser.add_argument('--joint-compensation', type=Path,
+                        help='joint_compensation.yaml to apply instead of the one recorded with the session '
+                             '(required for sessions recorded before it was saved)')
+    parser.add_argument('--still-window-sec', type=float, default=.15,
+                        help='half-width of the joint window checked around each image time')
+    parser.add_argument('--max-still-motion-deg', type=float, default=.05,
+                        help='largest joint motion within the window for a still frame; 0 keeps moving frames')
     parser.add_argument('--allow-synthetic', action='store_true')
     args = parser.parse_args()
     calibrate_session(args.session, args.out, mode=args.mode, urdf=args.urdf, base=args.base_link,
                       tip=args.tip_link, square_length=args.square_length_m, min_interval=args.min_interval,
                       min_rotation_deg=args.min_rotation_deg, min_translation=args.min_translation_m,
-                      reject=args.reject, allow_synthetic=args.allow_synthetic)
+                      reject=args.reject, allow_synthetic=args.allow_synthetic,
+                      compensation=args.joint_compensation, still_window=args.still_window_sec,
+                      max_still_motion_deg=args.max_still_motion_deg)
 
 
 if __name__ == '__main__':

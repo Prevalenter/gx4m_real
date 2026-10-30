@@ -113,7 +113,7 @@ playback_时间戳/
 
 RGB 为 640×480、30 FPS，保存为无额外压缩损失的 PNG；相机自身的 MJPG 解码损失仍然存在。图像没有应用去畸变，可在后续标定时使用 `session.json` 中的 `camera.K` 和 `camera.distortion`。设备内参是 SDK 提供的初始值，并非本次重新标定所得。安装仅使用 SDK 的原生绑定，不安装其 Open3D/OpenCV 等示例程序依赖。
 
-`frames.jsonl` 每行是一张图：`rgb_path` 为图片相对路径，`positions_rad` 为与该图对齐的 **实测** J1–J7 弧度角，`alignment_valid` 表示是否可用于后续配对。它使用相机帧到达主机的单调时钟时间，在前后两条机械臂反馈之间线性插值；每侧时间差不得超过 50 ms。缺少前后反馈或间隔过大的帧仍保留图片，但其 `positions_rad` 为 `null`，必须在标定时剔除。`joint_timestamps_monotonic`、`joint_time_offsets_sec` 和 `interpolation_alpha` 保留插值依据。`playback_phase` 区分 `return_to_start`、`trajectory` 和保持阶段；需要时可仅选择轨迹阶段。
+`frames.jsonl` 每行是一张图：`rgb_path` 为图片相对路径，`positions_rad` 为与该图对齐的 **实测** J1–J7 **电机原始**弧度角（未经关节补偿；`session.json` 的 `joint_compensation` 记录采集时生效的方向与零点，离线使用前须按它换算成模型角度），`alignment_valid` 表示是否可用于后续配对。它使用相机帧到达主机的单调时钟时间，在前后两条机械臂反馈之间线性插值；每侧时间差不得超过 50 ms。缺少前后反馈或间隔过大的帧仍保留图片，但其 `positions_rad` 为 `null`，必须在标定时剔除。`joint_timestamps_monotonic`、`joint_time_offsets_sec` 和 `interpolation_alpha` 保留插值依据。`playback_phase` 区分 `return_to_start`、`trajectory` 和保持阶段；需要时可仅选择轨迹阶段。
 
 `joints.jsonl` 按底层控制频率约 100 Hz 读取 SDK 缓存，重复时间戳不重复写入；采样不额外占用 CAN。RGB 和写盘在独立线程进行。`timestamp_monotonic` 的单位是秒，所有主机时间在同一时钟域；相机原始设备时间和系统时间另存为微秒字段，不直接当成该时钟域使用。SDK 对关节位置与反馈时间做加锁快照，避免读到一半更新的数据。
 

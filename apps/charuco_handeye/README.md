@@ -27,7 +27,29 @@ control/runtime/calibration/playback_时间戳/
   ...
 ```
 
-读取每张图对应的 `positions_rad`，只使用 `alignment_valid=true` 的帧。读取 `session.json` 中的相机内参、畸变、机器人 URDF 和基座世界位姿；不使用发送给机器人的目标角度，也不按图片文件名猜测关节对应关系。`joints.jsonl` 保留供复核，此处直接使用录制阶段已经插值好的逐图关节位置。
+读取每张图对应的 `positions_rad`，只使用 `alignment_valid=true` 的帧。读取 `session.json` 中的相机内参、畸变、机器人 URDF 和基座世界位姿；不使用发送给机器人的目标角度，也不按图片文件名猜测关节对应关系。
+
+### 关节补偿
+
+录制的 `positions_rad` 是**电机原始弧度**，必须先按关节补偿换算成模型角度，再做正运动学：
+
+```text
+模型角度 = direction × 电机角度 + offset_deg
+```
+
+录制时会把当时生效的 `joint_compensation`（方向和零点偏移）写进 `session.json`，标定默认使用它。
+
+- 用 `--joint-compensation apps/control/joint_compensation.yaml` 可以改用别的补偿文件，例如 FK 标定后更新过零点的文件。电机原始角度不变，所以新零点可以直接用于旧录制。
+- 指定文件的关节方向必须和录制时一致，否则直接报错。
+- 加入该字段之前录制的会话没有补偿信息，必须显式指定当时生效的补偿文件，否则直接报错，不会默认按 +1 方向处理。
+
+结果文件中，样本的 `positions_rad` 是补偿后的模型角度，`motor_positions_rad` 是原始记录值；`joint_compensation.source` 记录补偿来自会话还是哪个文件。
+
+### 只用静止帧
+
+图像和关节是按主机收到图像的时间对齐的，USB 延迟和曝光时间会带来几十毫秒的误差。机械臂运动时，这段误差会直接变成位姿误差：0.25 rad/s 下 30 ms 约 0.4°。
+
+因此默认读取 `joints.jsonl`，检查每张图前后 ±0.15 s 内的关节运动。任一关节的变化超过 0.05° 就跳过这一帧，原因记为 `moving`。回放轨迹应在每个采样姿态**停顿 1 秒以上**；全程匀速运动的录制将选不出帧。
 
 **运行时必须显式选择安装模式**，两者不能混用：
 
@@ -65,6 +87,9 @@ bash apps/charuco_handeye/run.sh calibrate \
 --min-rotation-deg 5      去掉与已选样本重复的姿态：旋转差和位移差均过小时丢弃
 --min-translation-m 0.01  上述位移阈值，单位米
 --reject 3               剔除重投影残差超过中位数 3 倍的样本再求解；0 关闭
+--joint-compensation F   改用补偿文件 F；旧会话没有记录补偿时必须指定
+--still-window-sec 0.15  静止检查的时间窗口（图像时间前后各多少秒）
+--max-still-motion-deg 0.05  窗口内允许的最大关节变化；0 关闭静止筛选
 --urdf /path/model.urdf  当录制时保存的 URDF 路径已经失效时指定
 --base-link base_link
 --tip-link Link7
@@ -73,8 +98,8 @@ bash apps/charuco_handeye/run.sh calibrate \
 流程：
 
 1. 验证帧格式、相机内参、畸变和七轴映射。原始 RGB 使用完整畸变参数；已去畸变图片才将畸变设为零。
-2. 跳过无效对齐帧和过于相似的姿态，检测 ChArUco，保留角点足够且检测重投影误差不超过 1 px 的图片。
-3. 用录制关节角和 GX7 URDF 计算 `T_base_flange`，至少需要 6 个有效视角，并检查旋转激励是否退化。
+2. 跳过无效对齐帧、运动中的帧和过于相似的姿态，检测 ChArUco，保留角点足够且检测重投影误差不超过 1 px 的图片。
+3. 用补偿后的模型关节角和 GX7 URDF 计算 `T_base_flange`，至少需要 6 个有效视角，并检查旋转激励是否退化。
 4. 用多个 OpenCV 手眼算法获得初值，再以原始角点像素联合优化两个未知刚体变换；按需剔除异常帧后重算。
 5. 写出求解结果、残差和逐帧检测报告。若求解失败，保留检测报告和候选样本供排查，不生成成功结果文件。
 

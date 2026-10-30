@@ -12,11 +12,22 @@ from scipy.spatial.transform import Rotation
 HERE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HERE))
 from board import make_board
+from gx4m_real.robot.compensation import JointCompensation
 from playback_data import DEFAULT_URDF, JOINTS, camera_parameters, load_session
 from robot import UrdfChainFK
 from solve_handeye import inv, rot_deg
 from solve_session import calibrate_session, check_motion
 from view_result import ResultViewer, poses_for_sample
+
+# Same directions as the real arm, plus offsets, so raw motor angles fed to FK would fail the tests.
+COMPENSATION = JointCompensation((-1, 1, -1, 1, -1, -1, -1), (0., 1.5, -2., 3., -2., -6.5, 0.))
+
+
+def joint_log_rows(stamp, motor, motion=0.):
+    """100 Hz raw feedback around one image time; motion (rad) ramps joint 1 to emulate a moving arm."""
+    offsets = np.arange(-.25, .2501, .01)
+    return [{'timestamp_monotonic': stamp + dt, 'positions_rad': (motor + [motion * dt / .25, 0, 0, 0, 0, 0, 0]).tolist()}
+            for dt in offsets]
 
 
 def synthetic_session(root, mode, count=14):
@@ -48,7 +59,7 @@ def synthetic_session(root, mode, count=14):
     board = make_board()
     image = board.generateImage((720, 900))
     outer = np.array([[0, 0, 0], [.18, 0, 0], [.18, .225, 0], [0, .225, 0]], dtype=float)
-    rows = []
+    rows, joints = [], []
     for attempt in range(1000):
         q = q0 + rng.uniform(-1, 1, 7) * np.deg2rad([25, 15, 15, 20, 30, 20, 30])
         E = fk.fk(q.tolist())
@@ -65,8 +76,11 @@ def synthetic_session(root, mode, count=14):
         frame = cv2.warpPerspective(image, H, (1280, 960), borderValue=160)
         filename = f'rgb/{len(rows):06d}.png'
         cv2.imwrite(str(root / filename), frame)
+        motor = COMPENSATION.to_motor(q)            # recordings store raw motor angles
+        stamp = 10. + len(rows)
+        joints += joint_log_rows(stamp, motor)
         rows.append({'frame_index': len(rows), 'rgb_path': filename, 'alignment_valid': True,
-                     'positions_rad': q.tolist(), 'timestamp_monotonic': 10 + len(rows),
+                     'positions_rad': motor.tolist(), 'timestamp_monotonic': stamp,
                      'playback_phase': 'trajectory'})
         if len(rows) >= count:
             break
@@ -77,11 +91,18 @@ def synthetic_session(root, mode, count=14):
                 'robot_urdf': str(DEFAULT_URDF), 'base_position': [.12, -.58, .72],
                 'base_wxyz': [.70710678, 0, 0, -.70710678],
                 'fixed_model_joints': pose['joint_positions'],
+                'joint_compensation': {'directions': list(COMPENSATION.directions),
+                                       'offsets_deg': list(COMPENSATION.offsets_deg)},
                 'camera': {'K': K.tolist(), 'distortion': [0.] * 8, 'undistorted': False,
                            'resolution': [1280, 960], 'synthetic': True}}
     (root / 'session.json').write_text(json.dumps(metadata))
     (root / 'frames.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in rows))
+    (root / 'joints.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in joints))
     return U, V
+
+
+def rewrite_json(path, change):
+    path.write_text(json.dumps(change(json.loads(path.read_text()))))
 
 
 class PlaybackTests(unittest.TestCase):
@@ -129,7 +150,10 @@ class PlaybackTests(unittest.TestCase):
                 self.assertLess(rot_deg(recovered[:3, :3].T @ U[:3, :3]), 1.)
                 self.assertLess(np.linalg.norm(np.array(result[key2])[:3, 3] - V[:3, 3]), .01)
                 self.assertLess(result['residual_summary']['reproj_px']['rms'], 1.)
+                self.assertEqual(result['joint_compensation']['source'], 'session')
                 sample = result['samples'][0]
+                np.testing.assert_allclose(sample['positions_rad'],
+                                           COMPENSATION.to_model(sample['motor_positions_rad']))
                 poses = poses_for_sample(result, sample)
                 np.testing.assert_allclose(poses['camera'] @ np.array(sample['T_cam_board']),
                                            poses['observed_board'])
@@ -158,6 +182,47 @@ class PlaybackTests(unittest.TestCase):
                 calibrate_session(root / 'session', root / 'result', mode='eye-to-hand', allow_synthetic=True)
             report = json.loads((root / 'result/detection_report.json').read_text())
             self.assertEqual(report[0]['reason'], 'invalid_alignment')
+
+    def test_compensation_is_required_and_directions_checked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            synthetic_session(root / 'session', 'eye-to-hand', count=2)
+            rewrite_json(root / 'session/session.json', lambda m: {k: v for k, v in m.items()
+                                                                   if k != 'joint_compensation'})
+            with self.assertRaisesRegex(ValueError, 'joint-compensation'):
+                load_session(root / 'session', allow_synthetic=True)
+            path = root / 'joint_compensation.yaml'
+            COMPENSATION.save(path)
+            loaded = load_session(root / 'session', allow_synthetic=True, compensation=path)
+            self.assertEqual(loaded['compensation_source'], str(path))
+            frame = loaded['frames'][0]
+            np.testing.assert_allclose(frame['positions_rad'], COMPENSATION.to_model(frame['motor_positions_rad']))
+            rewrite_json(root / 'session/session.json', lambda m: {**m, 'joint_compensation': {
+                'directions': [1] * 7, 'offsets_deg': [0.] * 7}})
+            with self.assertRaisesRegex(ValueError, 'directions differ'):
+                load_session(root / 'session', allow_synthetic=True, compensation=path)
+
+    def test_moving_frames_are_skipped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            synthetic_session(root / 'session', 'eye-to-hand')
+            log = root / 'session/joints.jsonl'
+            rows = [json.loads(line) for line in log.read_text().splitlines()]
+            frame0 = json.loads((root / 'session/frames.jsonl').read_text().splitlines()[0])
+            moving = joint_log_rows(frame0['timestamp_monotonic'], np.array(frame0['positions_rad']),
+                                    motion=np.deg2rad(.5))
+            rows = moving + [r for r in rows if abs(r['timestamp_monotonic'] - frame0['timestamp_monotonic']) > .3]
+            rows.sort(key=lambda r: r['timestamp_monotonic'])
+            log.write_text(''.join(json.dumps(r) + '\n' for r in rows))
+            result = calibrate_session(root / 'session', root / 'result', mode='eye-to-hand', min_interval=0,
+                                       min_rotation_deg=0, min_translation=0, reject=0, allow_synthetic=True)
+            report = json.loads((root / 'result/detection_report.json').read_text())
+            self.assertEqual(report[0]['reason'], 'moving')
+            self.assertGreater(report[0]['joint_motion_deg'], .05)
+            self.assertNotIn(0, [s['frame_index'] for s in result['samples']])
+            log.unlink()
+            with self.assertRaisesRegex(ValueError, 'joints.jsonl'):
+                calibrate_session(root / 'session', root / 'result2', mode='eye-to-hand', allow_synthetic=True)
 
 
 if __name__ == '__main__':

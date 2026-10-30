@@ -1,0 +1,21 @@
+version: 1
+# 孔板上的锥座（见 fixture/README.md 第 3 节）。名义坐标只用于显示，标定只用下面的实测孔距。
+plate_seats:
+  H1: [25.0, 25.0]
+  H2: [215.0, 25.0]
+  H3: [25.0, 165.0]
+  H4: [215.0, 165.0]
+# 单锥座块（垫高或放在别处），不参与孔距约束，只提供枢轴约束和 z 方向激励。
+extra_seats: [S1, S2]
+# 实测球心距（mm），填卡尺多次测量的平均值；null 表示未测，标定时忽略。
+distances_mm:
+  H1-H2: null
+  H3-H4: null
+  H1-H3: null
+  H2-H4: null
+  H1-H4: null
+  H2-H3: null
+# 测量噪声，决定枢轴残差与孔距残差的相对权重。
+sigma:
+  pivot_mm: 0.1
+  distance_mm: 0.05

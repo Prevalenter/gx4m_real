@@ -17,6 +17,7 @@ gx4m_real/
 ├── apps/                       # 通用工具，不绑定任务
 │   ├── control/                # 机械臂关节控制与可视化（Web）
 │   ├── charuco_handeye/        # ChArUco 手眼标定
+│   ├── fk_calibration/         # 枢轴 + 孔距 FK 标定：夹具、Viser 采集、求解
 │   └── orbbec/                 # capture_rgbd、rgbd_view、pointcloud_view
 ├── tasks/
 │   └── dexlong_gear3/          # 三齿轮装配任务

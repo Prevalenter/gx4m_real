@@ -152,6 +152,22 @@ class ArmDriver:
             self.mode = 'hold'
             return self.q.copy()
 
+    def release(self):
+        """Disable J1–J7 for hand guiding without recording; hold() re-enables at the measured pose."""
+        with self.lock:
+            self._require_healthy()
+            if self.recording is not None:
+                raise RuntimeError('正在录制')
+            self.playback = None
+            try:
+                self.robot.set_released(True)
+                self.q = validate_position(self.config, self.robot.getJP())
+            except Exception as exc:
+                self._fault(exc)
+                raise
+            self.requested = self.q.copy()
+            self.mode = 'released'
+
     def start_recording(self, path):
         with self.lock:
             self._require_healthy()

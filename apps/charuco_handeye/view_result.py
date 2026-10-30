@@ -14,7 +14,7 @@ from viser.extras import ViserUrdf
 import yourdfpy
 
 from board import make_board
-from playback_data import transform
+from handeye_session import transform
 from solve_handeye import project
 
 
@@ -123,7 +123,7 @@ class ResultViewer:
             self.image.image = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
             self.frustum.image = self.image.image
             r = sample['residual']
-            self.details.content = (f"帧 {sample['frame_index']} · {sample['playback_phase']}\n\n"
+            self.details.content = (f"样本 {sample['index']} · `{Path(sample['image_path']).name}`\n\n"
                 f"重投影 {r['reproj_px']:.3f} px · 位移残差 {r['trans_mm']:.2f} mm · 旋转残差 {r['rot_deg']:.3f}°\n\n"
                 f"相机世界位置：{poses['camera'][:3, 3].round(4).tolist()} m\n\n"
                 f"标定板世界位置：{poses['board'][:3, 3].round(4).tolist()} m")

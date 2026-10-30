@@ -16,7 +16,7 @@ gx4m_real/
 │       └── frames.py           # ColorFrame、RGBDFrame
 ├── apps/                       # 通用工具，不绑定任务
 │   ├── control/                # 机械臂关节控制与可视化（Web）
-│   ├── charuco_handeye/        # ChArUco 手眼标定
+│   ├── charuco_handeye/        # ChArUco 手眼标定：Viser 静止姿态采集、求解、结果查看
 │   ├── fk_calibration/         # 枢轴 + 孔距 FK 标定：夹具、Viser 采集、求解
 │   └── orbbec/                 # capture_rgbd、rgbd_view、pointcloud_view
 ├── tasks/

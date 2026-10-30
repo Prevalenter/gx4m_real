@@ -1,6 +1,12 @@
-# GX7 + Gemini / ChArUco 离线手眼标定
+# GX7 + Gemini / ChArUco 手眼标定
 
-直接读取 `control/run.sh` 回放时保存的 RGB 与关节对齐数据，完成 ChArUco 检测、GX7 正运动学、外参求解和 Viser 三维结果展示。整个流程离线，不连接 CAN、相机或驱动机器人。
+采集方式和 FK 标定一样：手动拖到一个姿态，让电机出力保持住，然后静止 1 秒，同时记录关节和图像。离线求解外参，并用 Viser 显示结果。
+
+```bash
+bash apps/charuco_handeye/run.sh collect      # 采集（真机，默认端口 8088）
+bash apps/charuco_handeye/run.sh calibrate --session <会话目录> --out <新目录>
+bash apps/charuco_handeye/run.sh view --result <新目录>/handeye_result.json
+```
 
 ## 安装
 
@@ -14,94 +20,96 @@ bash apps/charuco_handeye/setup.sh
 
 使用同一个 `gear3_control` 环境。标定采用 `opencv-contrib-python` 4.8–4.11，包含 ChArUco；不要再混装其他提供 `cv2` 的 OpenCV wheel。
 
-## 输入与安装方式
+## 安装方式
 
-输入就是回放生成的目录，例如：
+一次会话只对应一种安装方式，在采集页面选择，并记录进会话：
 
-```text
-control/runtime/calibration/playback_时间戳/
-  session.json
-  frames.jsonl
-  joints.jsonl
-  rgb/000000.png
-  ...
-```
-
-读取每张图对应的 `positions_rad`，只使用 `alignment_valid=true` 的帧。读取 `session.json` 中的相机内参、畸变、机器人 URDF 和基座世界位姿；不使用发送给机器人的目标角度，也不按图片文件名猜测关节对应关系。
-
-### 关节补偿
-
-录制的 `positions_rad` 是**电机原始弧度**，必须先按关节补偿换算成模型角度，再做正运动学：
-
-```text
-模型角度 = direction × 电机角度 + offset_deg
-```
-
-录制时会把当时生效的 `joint_compensation`（方向和零点偏移）写进 `session.json`，标定默认使用它。
-
-- 用 `--joint-compensation apps/control/joint_compensation.yaml` 可以改用别的补偿文件，例如 FK 标定后更新过零点的文件。电机原始角度不变，所以新零点可以直接用于旧录制。
-- 指定文件的关节方向必须和录制时一致，否则直接报错。
-- 加入该字段之前录制的会话没有补偿信息，必须显式指定当时生效的补偿文件，否则直接报错，不会默认按 +1 方向处理。
-
-结果文件中，样本的 `positions_rad` 是补偿后的模型角度，`motor_positions_rad` 是原始记录值；`joint_compensation.source` 记录补偿来自会话还是哪个文件。
-
-### 只用静止帧
-
-图像和关节是按主机收到图像的时间对齐的，USB 延迟和曝光时间会带来几十毫秒的误差。机械臂运动时，这段误差会直接变成位姿误差：0.25 rad/s 下 30 ms 约 0.4°。
-
-因此默认读取 `joints.jsonl`，检查每张图前后 ±0.15 s 内的关节运动。任一关节的变化超过 0.05° 就跳过这一帧，原因记为 `moving`。回放轨迹应在每个采样姿态**停顿 1 秒以上**；全程匀速运动的录制将选不出帧。
-
-**运行时必须显式选择安装模式**，两者不能混用：
-
-| `--mode` | 安装方式 | 求出的常量 |
+| 安装方式 | 说明 | 求出的常量 |
 |---|---|---|
-| `eye-to-hand` | 相机固定，板牢固安装在末端 | `T_base_cam`、`T_flange_board` |
-| `eye-in-hand` | 相机牢固安装在末端，板固定在环境中 | `T_flange_cam`、`T_base_board` |
+| `eye-in-hand` | 相机牢固装在末端，板固定在环境中 | `T_flange_cam`、`T_base_board` |
+| `eye-to-hand` | 相机固定，板牢固装在末端 | `T_base_cam`、`T_flange_board` |
 
-现有模型中带有腕部相机安装座；若实际使用这台随手运动的相机，应选 `eye-in-hand`。以实际安装方式为准，不能因为原始脚本写的是眼在手外就默认相机固定。
+现有模型带有腕部相机安装座。如果用的是这台随手臂运动的相机，就选 `eye-in-hand`。以实际安装为准。
 
-所有矩阵按 `T_parent_child` 命名：左乘后将 child 坐标转换到 parent 坐标，长度单位米。默认机器人基座为 URDF 的 `base_link`，末端参考帧为 `Link7`，七轴顺序为 `joint1`–`joint7`。板子/相机相对 `Link7` 的安装变换会参与求解，无需事先输入安装位置。
+所有矩阵按 `T_parent_child` 命名：左乘后把 child 坐标转换到 parent 坐标，长度单位为米。机器人基座为 URDF 的 `base_link`，末端参考帧为 `Link7`，七个关节为 `joint1`–`joint7`。
 
 ## 标定板
 
-使用本目录 `charuco_4x5_45mm_A4.pdf`：4×5 方格，方格边长 45 mm，标记边长 34 mm，字典 `DICT_4X4_50`，共 12 个内部角点。按 100% 打印并实测边长，用 `--square-length-m` 输入实测值；默认 0.045 m，标记边长按 34/45 的比例缩放。
+使用本目录的 `charuco_4x5_45mm_A4.pdf`：4×5 方格，方格边长 45 mm，标记边长 34 mm，字典 `DICT_4X4_50`，共 12 个内部角点。
 
-板必须平整，固定相机模式下板不能相对末端晃动，腕部相机模式下板不能在环境中移动。建议采集 15–30 个分散姿态，覆盖不同位置与至少两个独立旋转方向。只有平移、只绕同一轴旋转或重复同一姿态不足以可靠求解。
+- 按 100% 比例打印，用卡尺实测方格边长，采集和求解时都用 `--square-length-m` 填实测值。默认 0.045 m，标记边长按 34/45 的比例自动缩放。
+- 板必须平整。`eye-to-hand` 时板不能相对末端晃动，`eye-in-hand` 时板不能在环境中移动。
+
+## 采集
+
+```bash
+bash apps/charuco_handeye/run.sh collect                 # 真机 + 真实相机
+bash apps/charuco_handeye/run.sh collect --simulate      # 模拟机械臂和画面，只用来熟悉界面
+```
+
+打开 **http://127.0.0.1:8088**。启动时不会使能电机。不要同时运行 `apps/control` 或 FK 采集程序，它们会占用同一个 CAN 适配器和相机。
+
+每个姿态的操作：
+
+1. 点「连接真机（使能）」。之后每换一个姿态，都先点「失能拖动」，托住手臂拖到新位置。
+2. 点「保持当前位置」，让电机出力。
+3. 松手，等手臂稳定后点「采集」。
+
+采集时程序会做下面几件事，任何一项不通过，这个样本都作废，不会保存：
+
+- **必须在电机出力时采。** 「保持」或「关节控制」模式下才能采集，失能状态下不能采。
+- **关节必须静止。** 在 `--sample-sec`（默认 1 s）内取关节反馈的平均值，任一关节波动超过 `--max-spread-deg`（默认 0.05°）就作废。
+- **图像必须合格且静止。** 取同一时间段内收到的中间那张图像，标定板要检测合格（至少 6 个角点，重投影误差 ≤ 1 px）。同时比较这段时间第一张和最后一张图像，角点移动超过 `--max-pixel-motion`（默认 0.5 px）也作废。
+
+保存的关节值是电机原始弧度。会话里同时记录了采集时的关节补偿，标定时用 `模型角度 = direction × 电机角度 + offset_deg` 换算后再算正运动学。
+
+页面上的辅助信息：
+
+- **相机预览**：实时画面，叠加了检测结果，用来确认标定板完整、清晰地出现在画面中。
+- **实时求解**：训练样本满 6 个后自动求解一次，显示重投影残差、外参平移和旋转激励。旋转激励的第二个奇异值很小，说明转轴太单一。
+- **验证样本**：勾选「作为验证样本」后采到的样本不参与拟合，只用来检验。
+
+建议采 15–30 个分散的姿态，绕至少两个不同的方向大幅转动。只平移、只绕同一个轴转、或者重复同一姿态，都不足以可靠求解。最后再留 3–5 个验证样本。
+
+会话保存在 `apps/charuco_handeye/runtime/sessions/he_时间戳/`：
+
+```text
+session.json        URDF、关节补偿、相机内参与畸变、安装方式、标定板、采集参数
+samples.jsonl       每行一个静止样本：平均电机角度、波动、检测结果、图像路径、是否验证样本
+images/000000.png   该样本的原始 RGB（未去畸变、无叠加）
+```
+
+「删除最后一个样本」会同时删除对应的图像。改变安装方式后会自动新建会话。
 
 ## 离线标定
 
-以腕部相机为例，将命令中的时间戳替换成实际采集目录名；输出必须是尚不存在的新目录：
-
 ```bash
 bash apps/charuco_handeye/run.sh calibrate \
-  --session apps/control/runtime/calibration/playback_时间戳 \
-  --mode eye-in-hand \
+  --session apps/charuco_handeye/runtime/sessions/he_时间戳 \
   --out apps/charuco_handeye/runtime/calibration_001
 ```
 
-固定相机时仅将 `--mode` 改为 `eye-to-hand`。可选参数：
+输出目录必须是尚不存在的新目录。可选参数：
 
 ```text
---square-length-m 0.045   实测方格边长，单位米
---min-interval 0.25       被选取的相邻样本至少间隔多少秒
---min-rotation-deg 5      去掉与已选样本重复的姿态：旋转差和位移差均过小时丢弃
---min-translation-m 0.01  上述位移阈值，单位米
---reject 3               剔除重投影残差超过中位数 3 倍的样本再求解；0 关闭
---joint-compensation F   改用补偿文件 F；旧会话没有记录补偿时必须指定
---still-window-sec 0.15  静止检查的时间窗口（图像时间前后各多少秒）
---max-still-motion-deg 0.05  窗口内允许的最大关节变化；0 关闭静止筛选
---urdf /path/model.urdf  当录制时保存的 URDF 路径已经失效时指定
+--mode eye-in-hand        默认用会话记录的安装方式；指定且不一致时报错
+--square-length-m 0.045   实测方格边长；默认用会话记录的值
+--reject 3                剔除重投影残差超过中位数 3 倍的样本后重算；0 关闭
+--joint-compensation F    改用补偿文件 F（方向必须和录制时一致）
+--urdf /path/model.urdf   当会话记录的 URDF 路径已经失效时指定
 --base-link base_link
 --tip-link Link7
 ```
 
-流程：
+`--joint-compensation` 的典型用法：FK 标定更新了关节零点之后，用新的 `joint_compensation.yaml` 重新求解旧会话。保存的是电机原始角度，所以新零点可以直接用于旧数据，不用重新采集。
 
-1. 验证帧格式、相机内参、畸变和七轴映射。原始 RGB 使用完整畸变参数；已去畸变图片才将畸变设为零。
-2. 跳过无效对齐帧、运动中的帧和过于相似的姿态，检测 ChArUco，保留角点足够且检测重投影误差不超过 1 px 的图片。
-3. 用补偿后的模型关节角和 GX7 URDF 计算 `T_base_flange`，至少需要 6 个有效视角，并检查旋转激励是否退化。
-4. 用多个 OpenCV 手眼算法获得初值，再以原始角点像素联合优化两个未知刚体变换；按需剔除异常帧后重算。
-5. 写出求解结果、残差和逐帧检测报告。若求解失败，保留检测报告和候选样本供排查，不生成成功结果文件。
+求解流程：
+
+1. 对每个样本的图像重新检测 ChArUco。
+2. 用补偿后的模型关节角和 GX7 URDF 计算 `T_base_flange`。
+3. 至少需要 6 个训练样本，并检查旋转激励是否退化。
+4. 用多个 OpenCV 手眼算法得到初值，再以原始角点像素联合优化两个未知的刚体变换。
+5. 按需剔除离群样本后重算，最后用验证样本单独检验。
 
 固定相机满足：
 
@@ -119,16 +127,22 @@ T_base_flange_i @ T_flange_cam @ T_cam_board_i = T_base_board
 
 ```text
 calibration_001/
-  detection_report.json     每帧接受/跳过的原因
-  samples/sample_0000.json  候选样本：实测角度、FK、检测板位姿、原始角点
+  detection_report.json     每个样本的检测结果与接受/跳过原因
+  samples/sample_0000.json  样本：模型/电机角度、FK、检测到的板位姿、原始角点
   samples/sample_0000.png   检测角点与坐标轴叠加图
-  handeye_result.json       模式、变换、有效样本、内参、残差、URDF 与基座位姿
-  *.npy                    对应模式的常量变换
+  handeye_result.json       模式、变换、训练与验证样本、内参、残差、关节补偿、URDF 与基座位姿
+  *.npy                     对应模式的常量变换
 ```
+
+`handeye_result.json` 中：
+
+- `samples` 是最终参与拟合的训练样本，`rejected_sample_indices` 是被剔除的离群样本。
+- `validation_samples` 和 `validation_summary` 是验证样本及其残差。
+- 样本里的 `positions_rad` 是补偿后的模型角度，`motor_positions_rad` 是原始记录值；`joint_compensation.source` 记录补偿来自会话还是哪个文件。
 
 固定相机输出 `T_base_cam.npy`、`T_flange_board.npy`，并保留 `T_RC.npy` 作为 `T_base_cam` 的别名。
 
-腕部相机输出 `T_flange_cam.npy` 和 `T_base_board.npy`。**不会输出常量 `T_base_cam` 或 `T_RC`**，因为相机在基座/世界中的位姿随关节运动变化：
+腕部相机输出 `T_flange_cam.npy` 和 `T_base_board.npy`。**不会输出常量 `T_base_cam` 或 `T_RC`**，因为相机在基座和世界坐标系中的位姿随关节运动而变化：
 
 ```python
 T_base_cam = T_base_flange @ T_flange_cam
@@ -136,7 +150,7 @@ T_world_cam = T_world_base @ T_base_cam
 T_world_object = T_world_cam @ T_cam_object
 ```
 
-`T_world_base` 使用录制元数据中的基座位姿，不采用原 iiwa 脚本的 `[0, 0.8, 0]` 固定偏移。`handeye_result.json` 的 `samples` 只包含最终参与求解的样本；`rejected_frame_indices` 记录后续被异常值剔除的帧。
+`T_world_base` 使用会话记录的基座位姿。
 
 ## Viser 可视化
 
@@ -145,33 +159,31 @@ bash apps/charuco_handeye/run.sh view \
   --result apps/charuco_handeye/runtime/calibration_001/handeye_result.json
 ```
 
-打开 **http://127.0.0.1:8087**。可用 `--port` 修改端口，用 `--urdf` 覆盖迁移后的模型路径。
+打开 **http://127.0.0.1:8087**。可用 `--port` 修改端口，用 `--urdf` 覆盖已迁移的模型路径。
 
 页面显示：
 
-- GX7 + GX4M 模型，关节姿态来自选中的采集帧。
+- GX7 + GX4M 模型，关节姿态来自选中的样本。
 - 相机坐标轴与视锥，光轴沿相机坐标系 +Z。
-- 带实际 ChArUco 图案的板：由正运动学和标定结果预测的位置。
-- 粉色板轮廓：由该帧图像检测得到的位置，用于直观看预测与检测的一致性。
-- 原始图像上的检测角点和预测投影、当前样本残差、相机和板子的世界位置。
+- 带 ChArUco 图案的板：由正运动学和标定结果预测的位置。
+- 粉色板轮廓：由该样本图像检测得到的位置，用来直观对比预测和检测是否一致。
+- 原始图像上的检测角点和预测投影，以及当前样本的残差、相机和板子的世界位置。
 
-拖动“样本”滑块或打开“自动切换样本”查看不同姿态。腕部相机模式下相机随手移动、板固定；固定相机模式下相机固定、板随手移动。视锥是无畸变几何近似，像素叠加则使用完整内参和畸变。
+拖动「样本」滑块，或打开「自动切换样本」，可以查看不同姿态。视锥是不含畸变的几何近似；像素叠加使用完整的内参和畸变。
 
-若原采集图片被移动，三维场景仍可显示，图像区域会显示在空白底图上的投影；完整图像复核需保留原采集目录。
+## 测试与数据质量
 
-## 验证范围与数据质量
-
-目前还没有真实采集数据，不能给出真实标定参数或精度结论。测试在临时目录构造带 ChArUco 图像的模拟回放数据，验证两种安装模式的求解和三维显示，不会写入真实采集目录，也不会连接硬件：
+测试不连接硬件：用模拟机械臂驱动采集程序，用按当前关节姿态渲染的 ChArUco 图像代替相机，然后对生成的会话求解，覆盖两种安装方式。关节方向和零点使用非平凡的补偿，所以如果 FK 误用了电机原始角度，测试会失败。
 
 ```bash
 conda activate gear3_control
 python -m unittest discover -s apps/charuco_handeye/tests -v
 ```
 
-默认拒绝 `mock=true` 或 `synthetic=true` 的数据。测试专用 `--allow-synthetic` 必须显式开启，结果继续保留合成标记，不能当作真机标定数据。普通控制模拟模式生成的彩色渐变图没有 ChArUco，也没有相机内参，不能用于标定。
+默认拒绝 `mock=true` 或 `synthetic=true` 的数据。测试专用的 `--allow-synthetic` 必须显式开启，结果会保留合成标记，不能当作真机标定数据。
 
-录制阶段是主机软件时间对齐，USB 延迟、曝光时间和 CAN 顺序采样仍会带来误差。优先在低速或短暂停稳位置选帧，并用没有参与求解的姿态验证。低重投影残差不保证机器人模型、板尺寸或相机安装正确；需要结合物理位置、板刚性和新姿态复核。
+重投影残差低，并不保证机器人模型、板尺寸或相机安装是正确的。外参还会吸收 FK 误差，所以最好先完成 FK 零位标定（见 `apps/fk_calibration`）；同时要结合物理位置、板的刚性和验证样本来复核。
 
 ## 保留的旧入口
 
-原有 `gx4m_real/camera/sources.py`（原 `camera.py`）、`collect_samples.py`、`detect_charuco.py`、`verify.py`、`robot.py` 和 `solve_handeye.py` 保留，服务于旧的 ZED + iiwa 手工采集流程。**它们的默认模型、相机和世界偏移没有自动改成 GX7**。本项目采集数据请使用新的 `run.sh calibrate/view`，不要直接套用旧入口的默认参数。
+原有的 `gx4m_real/camera/sources.py`、`collect_samples.py`、`detect_charuco.py`、`verify.py` 和 `robot.py` 保留，服务于旧的 ZED + iiwa 手工采集流程。**它们的默认模型、相机和世界偏移没有改成 GX7。** 本项目请使用 `run.sh collect/calibrate/view`。`solve_handeye.py` 和 `robot.py` 中的求解与 FK 代码被新流程复用。

@@ -7,7 +7,8 @@ set +u
 conda activate gear3_control
 set -u
 case "${1:-}" in
+  collect) shift; exec python -u "${CALIB_DIR}/collect_app.py" "$@" ;;
   calibrate) shift; exec python -u "${CALIB_DIR}/solve_session.py" "$@" ;;
   view) shift; exec python -u "${CALIB_DIR}/view_result.py" "$@" ;;
-  *) echo "Usage: bash $0 {calibrate|view} [options]" >&2; exit 2 ;;
+  *) echo "Usage: bash $0 {collect|calibrate|view} [options]" >&2; exit 2 ;;
 esac

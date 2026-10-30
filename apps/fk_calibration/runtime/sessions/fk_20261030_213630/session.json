@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "created": "2026-10-30T21:36:30",
+  "mock": false,
+  "urdf": "/home/yuanshi/Documents/lx/gx4m_real/asset/gx7_right/urdf/gx7_right_gx4m_cam_xl330.urdf",
+  "urdf_sha256": "a114104d90990fd627c034bf6b983bcbd0a8a2f17f2f8fa13dc3d8357a4af26d",
+  "motor_config": "/home/yuanshi/Documents/lx/gx4m_real/third_party/libgx7/libgx7/hardware/configs/gx7_right.yaml",
+  "joint_compensation": {
+    "directions": [
+      -1,
+      1,
+      -1,
+      1,
+      -1,
+      -1,
+      -1
+    ],
+    "offsets_deg": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "plate_file": "/home/yuanshi/Documents/lx/gx4m_real/apps/fk_calibration/plate.yaml",
+  "plate": {
+    "version": 1,
+    "plate_seats": {
+      "H1": [
+        25.0,
+        25.0
+      ],
+      "H2": [
+        215.0,
+        25.0
+      ],
+      "H3": [
+        25.0,
+        165.0
+      ],
+      "H4": [
+        215.0,
+        165.0
+      ]
+    },
+    "extra_seats": [
+      "S1",
+      "S2"
+    ],
+    "distances_mm": {
+      "H1-H2": null,
+      "H3-H4": null,
+      "H1-H3": null,
+      "H2-H4": null,
+      "H1-H4": null,
+      "H2-H3": null
+    },
+    "sigma": {
+      "pivot_mm": 0.1,
+      "distance_mm": 0.05
+    }
+  },
+  "sampling": {
+    "duration_sec": 1.0,
+    "max_spread_deg": 0.05
+  },
+  "positions": "motor_positions_rad are raw motor angles; model angles = compensation.to_model(...)"
+}

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gex16"
+version = "0.1.0"
+description = "GX16 hand hardware files from GEX16: Dynamixel SDK and motor config"
+requires-python = ">=3.10"
+dependencies = ["pyserial>=3.5", "PyYAML>=6"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["gex16*"]
+
+[tool.setuptools.package-data]
+gex16 = ["gx16.yaml"]

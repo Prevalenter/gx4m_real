@@ -1,0 +1,9 @@
+{
+  "source_project": "https://github.com/Prevalenter/GEX16",
+  "source_commit": "62355b0b82f4c8be153671e907aa732ff678b4ff",
+  "copied": {
+    "src/_vendor/dynamixel_sdk/*.py": "gex16/dynamixel_sdk/ (ROBOTIS Dynamixel SDK, Apache-2.0, unchanged)",
+    "src/resources/gx16/config.yaml": "gex16/gx16.yaml (unchanged)"
+  },
+  "note": "Hand (GX16) only. Not copied: EX16 exoskeleton, retargeting, teleop, ZMQ transport, Viser viewers, GeoRT. The driver is gx4m_real.robot.hand: same motor registers and angle convention as GEX16 src/gx16.py and src/motor.py (URDF deg = (present position deg - 90) * JOINT_MOTOR_DIRECTIONS), with group sync read/write instead of per-motor transactions."
+}

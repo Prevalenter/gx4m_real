@@ -27,7 +27,8 @@ def label(image, lines, good):
                     .5, (80, 255, 80) if good else (0, 210, 255), 1, cv2.LINE_AA)
 
 
-def main(argv=None, observer=None):
+def main(argv=None, observer=None, frame_hook=None):
+    """frame_hook(scorer, refiner, glctx, output) returns a callable run on each frame after its gear pose is sent."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--gpu', default='0')
     parser.add_argument('--device-index', type=int, default=0)
@@ -69,6 +70,7 @@ def main(argv=None, observer=None):
     print(f'Loading FoundationPose on physical GPU {args.gpu}; output: {output}', flush=True)
     scorer, refiner = ScorePredictor(), PoseRefinePredictor()
     glctx = dr.RasterizeCudaContext()
+    on_frame = frame_hook(scorer, refiner, glctx, output) if frame_hook is not None else None
     estimator = None
     writer = None
     frame_count = accepted = registrations = tracks = 0
@@ -207,6 +209,8 @@ def main(argv=None, observer=None):
                 log.flush()
                 if observer is not None:
                     observer.update(record, rgb=frame.rgb, K=frame.K)
+                if on_frame is not None:
+                    on_frame(frame)
                 if writer is None and args.record:
                     writer = cv2.VideoWriter(str(output / 'preview.avi'), cv2.VideoWriter_fourcc(*'MJPG'),
                                              15, (bgr.shape[1], bgr.shape[0]))

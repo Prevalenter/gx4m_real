@@ -4,6 +4,8 @@
 
 **2026-10-31 更新**：`live_gear36.py`、`detect_gear36.py`、`viser_scene.py` 增加 `--gear`，默认改为 step1 用的 `gear24`（`gear24_visual.obj`，外径 78 mm，24 齿对称）。用 `--gear gear36` 可回到下文的 gear36 流程。网格的原点和坐标轴就是仿真里齿轮的坐标系（`gears.py`）。颜色分割按齿轮自动选：gear24 红色，gear36 蓝色，gear48 黄色（`gears.py` 里的 `HSV_RANGES`，红色跨过色相 0°，用两段范围）。光照不同时可以用 `--hsv-low/--hsv-high` 换成一段自定义范围。`publish_gear_pose.py` 用 UDP 把位姿发给 `run_step1.py`；`step1_setup.py` 用 Viser 做开跑前的底板和起点摆放检查，同时转发位姿（见仓库 README 的“step1 真机运行”）。
 
+**底板和 gear24 同一进程检测**：`step1_setup.py` / `run_setup.sh` 里 gear24 每帧实时更新；底板（`fixture_visual.obj`，Viser 里黑色，半透明灰色是训练位置）只在按下“检测底板”按钮时测一次：每 5 帧配准一次，融合 5 次一致的结果（最多尝试 15 次），之后不再更新，也不占算力。失败时保留上次结果并显示原因。配准会短暂卡住齿轮循环，跑策略时不要按。比渲染底板更靠近相机的深度（手、齿轮）算遮挡。`detect_plate.py` / `run_plate.sh` 单独测一次并保存 `plate_result.json`，可用 `step1_setup.py --plate` 显示。底板是黑色的：掩码取桌面上方 6–45 mm 的黑色区域（高度来自手眼标定，黑色判定 HSV 的 V ≤ 90，可用 `--black-value-max` 调整）并扣掉三种齿轮颜色。黑色板面上没有深度的像素算作板面，避免板面被深度空洞切碎；这些像素和齿轮像素都不计入校验。黑色表面的深度可能很差，有效深度太少时这一帧会被拒绝，`frames.json` 的 `depth_pixels` 记录每帧的有效深度点数。测量时尽量让底板上没有东西。这段代码只做过合成数据测试（FoundationPose 用假后端代替），还没有在实物和 GPU 上运行过，按钮检测时齿轮卡顿多久也没有实测。其他齿轮不跟踪，只跟 gear24。
+
 ## 使用环境
 
 安装完成后可以直接激活：

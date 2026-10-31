@@ -22,6 +22,7 @@ HSV_RANGES = {'red': (((0, 100, 40), (8, 255, 255)), ((170, 100, 40), (179, 255,
               'yellow': (((18, 90, 60), (35, 255, 255)),)}
 DISPLAY_RGB = {'red': (220, 50, 40), 'blue': (60, 120, 230), 'yellow': (235, 200, 40)}
 PLATE_MESH = ASSEMBLY/'fixture_visual.obj'
+PLATE_SIZE = (.225, .25)
 
 
 def gear_mesh_path(gear):
@@ -41,6 +42,12 @@ def check_gear_mesh(mesh, gear):
     if abs(diameter - expected) > .1*expected:
         raise ValueError(f'Expected the {gear} mesh in metres (about {expected*1000:.0f} mm across), '
                          f'got {diameter*1000:.1f} mm')
+
+
+def check_plate_mesh(mesh):
+    """Reject a mesh that is not the plate in metres (footprint within 10%)."""
+    if not np.allclose(mesh.extents[:2], PLATE_SIZE, rtol=.1, atol=0):
+        raise ValueError(f'Expected the plate mesh in metres (about 225 x 250 mm), got {mesh.extents[:2]*1000} mm')
 
 
 def yaw_symmetry(gear):

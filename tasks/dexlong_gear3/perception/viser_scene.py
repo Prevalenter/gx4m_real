@@ -1,4 +1,4 @@
-"""Viser scene for the GX7 robot, a fixed calibrated camera and gear36 poses."""
+"""Viser scene for the GX7 robot, a fixed calibrated camera and split-task gear poses (default gear24)."""
 from __future__ import annotations
 
 import argparse
@@ -14,10 +14,11 @@ import viser
 from viser.extras import ViserUrdf
 import yourdfpy
 
+from gears import DEFAULT_GEAR, DISPLAY_RGB, GEAR_COLORS, GEARS, check_gear_mesh, gear_mesh_path
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 DEFAULT_URDF = ROOT / 'asset/gx7_right/urdf/gx7_right_gx4m_cam_xl330.urdf'
-DEFAULT_MESH = ROOT / 'asset/mjfit_gears3_split/assembly/gear36_visual.obj'
 DEFAULT_INITIAL = HERE.parent / 'config/initial_pose.json'
 JOINTS = [f'joint{i}' for i in range(1, 8)]
 
@@ -82,7 +83,7 @@ def read_detection(path):
 
 
 class SceneViewer:
-    def __init__(self, calibration, *, initial, urdf=DEFAULT_URDF, mesh=DEFAULT_MESH,
+    def __init__(self, calibration, *, initial, urdf=DEFAULT_URDF, gear=DEFAULT_GEAR, mesh=None,
                  joints=None, host='127.0.0.1', port=8088, live=False, stale_after=2.):
         self.calibration = calibration
         self.live = live
@@ -109,10 +110,10 @@ class SceneViewer:
         self.model.update_cfg(self.q)
         base_link = calibration.get('base_link', 'base_link')
         root_in_base = self.model.get_transform(self.model.base_link, base_link)
-        gear = trimesh.load(mesh, force='mesh')
-        if not .10 < float(gear.extents[:2].max()) < .13:
-            raise ValueError('Expected gear36 mesh in metres, about 114 mm in diameter')
-        gear.visual.vertex_colors = np.tile([60, 120, 230, 255], (len(gear.vertices), 1))
+        self.gear_name = gear
+        gear = trimesh.load(mesh or gear_mesh_path(gear), force='mesh')
+        check_gear_mesh(gear, self.gear_name)
+        gear.visual.vertex_colors = np.tile([*DISPLAY_RGB[GEAR_COLORS[self.gear_name]], 255], (len(gear.vertices), 1))
         self.server = viser.ViserServer(host=host, port=port, label='GX7 · 固定相机 · 零件位姿')
         self.server.scene.set_up_direction('+z')
         self.server.scene.add_grid('/ground', width=2, height=2, plane='xy')
@@ -126,7 +127,7 @@ class SceneViewer:
         self.frustum = self.server.scene.add_camera_frustum('/camera/frustum',
             fov=np.deg2rad(55), aspect=4/3, scale=.15, color=(255, 180, 40))
         self.part = self.server.scene.add_frame('/part', axes_length=.07, visible=False)
-        self.server.scene.add_mesh_trimesh('/part/gear36', gear)
+        self.server.scene.add_mesh_trimesh('/part/gear', gear)
         gui = self.server.gui
         gui.add_markdown('## 固定相机与零件位姿\n' +
                          ('**合成演示/标定数据，非真机测量。**\n\n' if calibration.get('synthetic') else '') +
@@ -196,7 +197,7 @@ class SceneViewer:
                 f"相机世界位置：{self.T_world_cam[:3, 3].round(4).tolist()} m\n\n"
                 f"零件世界位置：{world[:3, 3].round(4).tolist()} m\n\n"
                 f"零件世界四元数 wxyz：{Rotation.from_matrix(world[:3, :3]).as_quat()[[3, 0, 1, 2]].round(5).tolist()}\n\n"
-                '齿轮模型使用检测输出的 CAD 原点；10° 对称偏航可能等价。')
+                f'齿轮模型原点即仿真齿轮原点；偏航每 {360 / GEARS[self.gear_name][0]:.0f}° 等价。')
 
     def expire(self, now=None):
         with self.lock:
@@ -225,7 +226,8 @@ def main():
     parser.add_argument('--initial-pose', type=Path, default=DEFAULT_INITIAL)
     parser.add_argument('--joints', type=Path, help='Reference joint pose JSON (radians); never commands hardware')
     parser.add_argument('--urdf', type=Path, default=DEFAULT_URDF)
-    parser.add_argument('--mesh', type=Path, default=DEFAULT_MESH)
+    parser.add_argument('--gear', choices=sorted(GEARS), default=DEFAULT_GEAR)
+    parser.add_argument('--mesh', type=Path, help='Default: the simulation CAD mesh of --gear')
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8088)
     parser.add_argument('--stale-after', type=float, default=2.)
@@ -245,13 +247,14 @@ def main():
                        'synthetic': True, 'base_link': 'base_link'}
     else:
         calibration = load_calibration(args.calibration, initial)
-    viewer = SceneViewer(calibration, initial=initial, urdf=args.urdf, mesh=args.mesh,
+    viewer = SceneViewer(calibration, initial=initial, urdf=args.urdf, gear=args.gear, mesh=args.mesh,
                          joints=args.joints, host=args.host, port=args.port,
                          live=args.live, stale_after=args.stale_after)
     try:
         if args.live:
             from live_gear36 import main as detect_live
-            detect_live(['--mesh', str(args.mesh), '--no-display', *inference_args], observer=viewer)
+            mesh = ['--mesh', str(args.mesh)] if args.mesh else []
+            detect_live(['--gear', args.gear, *mesh, '--no-display', *inference_args], observer=viewer)
         else:
             if args.demo:
                 pose = np.eye(4)

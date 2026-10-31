@@ -5,6 +5,9 @@ __pycache__/
 runtime/
 outputs/
 
+# Real-robot policy run logs
+tasks/dexlong_gear3/runs/
+
 # Orbbec captures and SDK logs
 captures/
 Log/

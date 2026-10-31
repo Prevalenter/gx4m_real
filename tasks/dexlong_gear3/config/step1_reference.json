@@ -1,6 +1,6 @@
 {
- "task": "gear3_split_step0",
- "checkpoint": "E:\\work\\gx4max\\gx4m_learning\\logs\\rsl_rl\\gx4m_dexlong_gear3_split_step0\\2026-10-27_21-11-17\\model_750.pt",
+ "task": "gear3_split_step1",
+ "checkpoint": "E:\\work\\gx4max\\gx4m_learning\\logs\\rsl_rl\\gx4m_dexlong_gear3_split_step1\\2026-10-31_12-56-24\\model_500.pt",
  "joint_order": [
   "joint1",
   "joint2",
@@ -27,13 +27,13 @@
   "gx4m_joint16"
  ],
  "lower": [
-  -3.0,
-  -3.0,
-  -3.0,
-  -3.0,
-  -3.0,
-  -3.0,
-  -3.0,
+  -1.5707963705062866,
+  -1.5707963705062866,
+  -1.6016921997070312,
+  -3.000683546066284,
+  -2.132704973220825,
+  -2.0373404026031494,
+  -1.7453292608261108,
   0.0,
   0.0,
   0.0,
@@ -52,13 +52,13 @@
   0.0
  ],
  "upper": [
-  3.0,
-  3.0,
-  3.0,
-  3.0,
-  3.0,
-  3.0,
-  3.0,
+  1.5707963705062866,
+  0.2617993950843811,
+  1.539900541305542,
+  1.7989718914031982,
+  2.0560851097106934,
+  1.8023840188980103,
+  1.7453292608261108,
   1.5699999332427979,
   2.0999996662139893,
   1.5699999332427979,
@@ -231,9 +231,9 @@
   10.0,
   10.0,
   10.0,
-  10.0,
-  10.0,
-  10.0,
+  6.0,
+  6.0,
+  6.0,
   0.5,
   0.5,
   0.5,
@@ -252,13 +252,13 @@
   0.5
  ],
  "velocity_limit": [
-  3.0,
-  3.0,
-  3.0,
-  3.0,
-  3.0,
-  3.0,
-  3.0,
+  1.5,
+  1.5,
+  1.5,
+  1.5,
+  1.5,
+  1.5,
+  1.5,
   3.0,
   3.0,
   3.0,
@@ -392,9 +392,9 @@
  ],
  "mounted_gears": [],
  "preinsert_pos": [
-  0.10999999940395355,
-  -0.3449999988079071,
-  0.31450000405311584
+  -0.12629064917564392,
+  -0.2096678912639618,
+  0.2529999911785126
  ],
  "preinsert_quat": [
   1.0,
@@ -403,9 +403,9 @@
   0.0
  ],
  "final_pos": [
-  0.10999999940395355,
-  -0.3449999988079071,
-  0.31450000405311584
+  -0.12629064917564392,
+  -0.2096678912639618,
+  0.22599999606609344
  ],
  "final_quat": [
   1.0,
@@ -517,6 +517,7 @@
   0.019
  ],
  "goal_yaw_symmetry": 24,
+ "yaw_free_goal": true,
  "p2p": {
   "distance_delta_rew_scale": 100.0,
   "keypoint_rew_scale": 200.0,
@@ -538,9 +539,9 @@
   "reach_goal_bonus": 1000.0,
   "arm_velocity_penalty": 0.03,
   "hand_velocity_penalty": 0.003,
-  "success_steps": 30,
+  "success_steps": 5,
   "force_consecutive_near_goal_steps": false,
-  "insertion_success_tolerance": 0.01,
+  "insertion_success_tolerance": 0.002,
   "retract_success_tolerance": 0.005,
   "retract_distance_threshold": 0.2,
   "retract_all_fingers": true,
@@ -548,12 +549,12 @@
   "keypoint_progress_mode": "delta",
   "retract_reward_scale": 5.0,
   "retract_success_bonus": 1000.0,
-  "episode_steps": 600,
+  "episode_steps": 300,
   "fall_height": 0.1,
   "hand_far_distance": 1.5,
   "clamp_abs_observations": 10.0
  },
- "preinsert_accepts_lower": false,
+ "preinsert_accepts_lower": true,
  "binary_tactile_threshold_n": 0.3,
  "policy_fields": {
   "joint_pos": 23,
@@ -601,13 +602,14 @@
    "gx4m_joint16"
   ],
   "smoothing": 0.2,
-  "arm_speed_scale": 3.0,
+  "arm_speed_scale": 1.5,
   "control_dt": 0.016666666666666666,
   "fingertip_point": "offset_pad"
  },
+ "act_moving_average": 0.36,
  "physics_dt": 0.008333333333333333,
- "step_dt": 0.016666666666666666,
- "decimation": 2,
+ "step_dt": 0.03333333333333333,
+ "decimation": 4,
  "gravity": [
   0.0,
   0.0,

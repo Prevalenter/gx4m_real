@@ -2,6 +2,8 @@
 
 此目录用于 `dexlong_gear3_split` 的感知工作。已配置独立 Conda 环境，并于 2026-10-28 使用空闲 GPU 0（RTX 3090）通过 GPU 安装检查。两组官方预训练权重已下载并加载，已用更换后的 Gemini 335 完成桌面蓝色 36 齿齿轮的单帧位姿估计和连续跟踪预览。机器人坐标标定与策略接入尚未实现。
 
+**2026-10-31 更新**：`live_gear36.py`、`detect_gear36.py`、`viser_scene.py` 增加 `--gear`，默认改为 step1 用的 `gear24`（`gear24_visual.obj`，外径 78 mm，24 齿对称）。用 `--gear gear36` 可回到下文的 gear36 流程。网格的原点和坐标轴就是仿真里齿轮的坐标系（`gears.py`）。颜色分割按齿轮自动选：gear24 红色，gear36 蓝色，gear48 黄色（`gears.py` 里的 `HSV_RANGES`，红色跨过色相 0°，用两段范围）。光照不同时可以用 `--hsv-low/--hsv-high` 换成一段自定义范围。`publish_gear_pose.py` 用 UDP 把位姿发给 `run_step1.py`；`step1_setup.py` 用 Viser 做开跑前的底板和起点摆放检查，同时转发位姿（见仓库 README 的“step1 真机运行”）。
+
 ## 使用环境
 
 安装完成后可以直接激活：
@@ -65,7 +67,7 @@ CUDA_VISIBLE_DEVICES=0 OMP_NUM_THREADS=4 python -u tasks/dexlong_gear3/perceptio
 使用项目实际资产 `asset/mjfit_gears3_split/assembly/gear36_visual.obj`，单位为米，外径约 113.7 mm，总高 38 mm。输出位姿保持 CAD 原点：齿盘 z 范围为 −4 至 4 mm，轮毂顶面 z 为 34 mm。绕局部 Z 轴存在 10° 周期对称，不能把等价的齿间偏航角当作唯一朝向。
 
 - `apps/orbbec/capture_rgbd.py`（基于 `gx4m_real/camera/orbbec.py` 的 `OrbbecRGBDStream`）：SDK 同步 RGB-D，进行深度到彩色对齐，再用真实彩色内参去畸变；保存 `rgb.png`、米制 `rgbd.npz`、毫米制深度图、标定信息和米制彩色点云 `scene.ply`。不会通过简单缩放伪造深度对齐。
-- `detect_gear36.py`：读取上述采集，使用 `--blue-mask` 提取最大的蓝色区域，或通过 `--mask` 指定目标掩码，调用预训练 scorer/refiner，保存 `object_in_camera.txt`、`overlay.png`、`target.ply`、`posed_gear36.ply` 和 `result.json`。位姿定义为 `p_camera = T @ p_mesh`，相机坐标为 X 向右、Y 向下、Z 向前。蓝色分割只适用于当前蓝色齿轮场景；其他蓝色大物体可能被误选。
+- `detect_gear36.py`：读取上述采集，使用 `--color-mask`（旧名 `--blue-mask`）提取该齿轮颜色的最大区域，或通过 `--mask` 指定目标掩码，调用预训练 scorer/refiner，保存 `object_in_camera.txt`、`overlay.png`、`target.ply`、`posed_gear36.ply` 和 `result.json`。位姿定义为 `p_camera = T @ p_mesh`，相机坐标为 X 向右、Y 向下、Z 向前。颜色分割只适用于当前场景，画面里同色的更大物体会被误选。
 - `camera-requirements.txt`：可选相机 SDK 依赖，安装在 `foundationpose` 环境内。已安装 `pyorbbecsdk2==2.1.2`，其底层 SDK 为 2.9.3。
 - 官方权重来源和 SHA-256 记录于 `runtime/weights-manifest.json`。
 
@@ -78,11 +80,11 @@ python apps/orbbec/capture_rgbd.py \
   --output tasks/dexlong_gear3/perception/outputs/gear36_capture
 
 # 当前场景为蓝色齿轮，使用最大蓝色连通域生成初始掩码。
-# 也可将 --blue-mask 换为 --mask /path/to/mask.png。
+# 也可将 --color-mask 换为 --mask /path/to/mask.png。
 # 外部 mask.png 与该次 rgb.png 同尺寸；目标为白色，背景为黑色。
 OMP_NUM_THREADS=4 python tasks/dexlong_gear3/perception/detect_gear36.py \
   --capture tasks/dexlong_gear3/perception/outputs/gear36_capture \
-  --blue-mask \
+  --gear gear36 --color-mask \
   --output tasks/dexlong_gear3/perception/outputs/gear36_pose --gpu 0
 ```
 

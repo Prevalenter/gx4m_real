@@ -1,4 +1,4 @@
-"""Estimate the split task's gear36 pose from calibrated RGB-D and a target mask."""
+"""Estimate a split-task gear pose (default gear24, step1) from calibrated RGB-D and a target mask."""
 from __future__ import annotations
 
 import argparse
@@ -10,21 +10,26 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from gears import DEFAULT_GEAR, GEAR_COLORS, GEARS, check_gear_mesh, gear_mesh_path, hsv_ranges, yaw_symmetry
+
 HERE = Path(__file__).resolve().parent
-DEFAULT_MESH = HERE.parents[2] / 'asset/mjfit_gears3_split/assembly/gear36_visual.obj'
+DEFAULT_MESH = gear_mesh_path(DEFAULT_GEAR)
 
 
-def blue_gear_mask(rgb: np.ndarray, depth: np.ndarray) -> np.ndarray:
-    """Select the largest blue component in this scene, not a general object detector."""
+def color_gear_mask(rgb: np.ndarray, depth: np.ndarray, ranges) -> np.ndarray:
+    """Select the largest component inside the HSV ranges (gears.hsv_ranges) in this scene, not a general
+    object detector: no larger object of the same color may be in view."""
     hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
-    candidate = cv2.inRange(hsv, np.array([95, 90, 25]), np.array([140, 255, 255]))
+    candidate = np.zeros(hsv.shape[:2], dtype=np.uint8)
+    for low, high in ranges:
+        candidate |= cv2.inRange(hsv, np.array(low), np.array(high))
     count, labels, stats, _ = cv2.connectedComponentsWithStats(candidate)
     if count < 2:
-        raise ValueError('No blue target found; provide an explicit --mask')
+        raise ValueError('No target of the gear color found; provide an explicit --mask')
     label = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
     mask = labels == label
     if int((mask & (depth > 0)).sum()) < 100:
-        raise ValueError('Largest blue component lacks valid depth; provide an explicit --mask')
+        raise ValueError('Largest gear-colored component lacks valid depth; provide an explicit --mask')
     return mask
 
 
@@ -33,12 +38,17 @@ def main() -> None:
     parser.add_argument('--capture', type=Path, required=True, help='Directory produced by apps/orbbec/capture_rgbd.py')
     masks = parser.add_mutually_exclusive_group(required=True)
     masks.add_argument('--mask', type=Path, help='White target pixels, black background; same size as RGB')
-    masks.add_argument('--blue-mask', action='store_true', help='Use largest blue region; suitable for the observed blue gear scene')
+    masks.add_argument('--color-mask', '--blue-mask', dest='color_mask', action='store_true',
+                       help="Use the largest region of the gear's color (gear24 red, gear36 blue, gear48 yellow)")
     parser.add_argument('--output', type=Path, required=True, help='New output directory')
-    parser.add_argument('--mesh', type=Path, default=DEFAULT_MESH)
+    parser.add_argument('--gear', choices=sorted(GEARS), default=DEFAULT_GEAR)
+    parser.add_argument('--mesh', type=Path, help='Default: the simulation CAD mesh of --gear')
+    parser.add_argument('--hsv-low', type=int, nargs=3, help='OpenCV HSV range replacing the gear color (with --hsv-high)')
+    parser.add_argument('--hsv-high', type=int, nargs=3)
     parser.add_argument('--gpu', default='0', help='Physical GPU index')
     parser.add_argument('--iterations', type=int, default=5)
     args = parser.parse_args()
+    args.mesh = args.mesh or gear_mesh_path(args.gear)
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
     import torch
@@ -54,8 +64,9 @@ def main() -> None:
         rgb, depth, K = data['rgb'], data['depth'], data['K']
     capture_meta_path = args.capture / 'capture.json'
     capture_meta = json.loads(capture_meta_path.read_text()) if capture_meta_path.exists() else {}
-    if args.blue_mask:
-        mask = blue_gear_mask(rgb, depth)
+    ranges = hsv_ranges(args.gear, args.hsv_low, args.hsv_high)
+    if args.color_mask:
+        mask = color_gear_mask(rgb, depth, ranges)
     else:
         mask = cv2.imread(str(args.mask), cv2.IMREAD_GRAYSCALE)
         if mask is None or mask.shape != depth.shape:
@@ -65,13 +76,9 @@ def main() -> None:
         raise ValueError('Insufficient valid target depth for registration')
     args.output.mkdir(parents=True, exist_ok=False)
     mesh = trimesh.load(args.mesh, force='mesh')
-    if not (.10 < float(mesh.extents[:2].max()) < .13):
-        raise ValueError('Expected gear mesh in metres, approximately 114 mm diameter')
-    # The CAD gear repeats every 10 degrees around its local Z axis.
-    symmetry = np.repeat(np.eye(4)[None], 36, axis=0)
-    for i, angle in enumerate(np.arange(36) * 2 * np.pi / 36):
-        c, s = np.cos(angle), np.sin(angle)
-        symmetry[i, :2, :2] = [[c, -s], [s, c]]
+    check_gear_mesh(mesh, args.gear)
+    # The CAD gear repeats every tooth pitch around its local Z axis.
+    symmetry = yaw_symmetry(args.gear)
     scorer = ScorePredictor()
     refiner = PoseRefinePredictor()
     glctx = dr.RasterizeCudaContext()
@@ -110,17 +117,17 @@ def main() -> None:
     cv2.imwrite(str(args.output / 'rendered_mask.png'), silhouette.astype(np.uint8) * 255)
     object_cloud_count = save_cloud(args.output / 'target.ply', rgb, np.where(mask, depth, 0), K)
     mesh.apply_transform(pose)
-    mesh.export(args.output / 'posed_gear36.ply')
+    mesh.export(args.output / f'posed_{args.gear}.ply')
     report = {
-        'capture': str(args.capture.resolve()), 'mesh': str(args.mesh.resolve()),
+        'capture': str(args.capture.resolve()), 'gear': args.gear, 'mesh': str(args.mesh.resolve()),
         'synthetic_test_only': bool(capture_meta.get('synthetic_test_only', False)),
-        'mask_source': 'largest blue HSV component' if args.blue_mask else str(args.mask.resolve()),
+        'mask_source': f'largest {GEAR_COLORS[args.gear]} component, HSV {ranges}' if args.color_mask else str(args.mask.resolve()),
         'physical_gpu': args.gpu, 'gpu': torch.cuda.get_device_name(),
         'object_in_camera': pose.tolist(), 'translation_m': pose[:3, 3].tolist(),
         'gear_axis_in_camera': pose[:3, 2].tolist(),
         'coordinate_convention': 'p_camera = object_in_camera @ p_mesh; metres; +X right, +Y down, +Z forward',
-        'mesh_origin': 'simulation CAD origin; gear disc z=-0.004..0.004 m, hub reaches z=0.034 m',
-        'yaw_symmetry_degrees': 10, 'registration_seconds': elapsed,
+        'mesh_origin': 'simulation gear body frame; gear disc z=-0.004..0.004 m, hub reaches z=0.034 m',
+        'yaw_symmetry_degrees': 360 / GEARS[args.gear][0], 'registration_seconds': elapsed,
         'mask_pixels': int(mask.sum()), 'target_cloud_points': object_cloud_count,
         'render_mask_iou': float((silhouette & mask).sum() / max(int(union.sum()), 1)),
         'median_overlap_depth_error_m': median_depth_error,

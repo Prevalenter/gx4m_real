@@ -1,4 +1,4 @@
-"""Live Gemini + FoundationPose preview: q quit, r reinitialize, s save."""
+"""Live Gemini + FoundationPose gear tracking (default gear24, step1): q quit, r reinitialize, s save."""
 from __future__ import annotations
 
 import argparse
@@ -14,7 +14,8 @@ from zoneinfo import ZoneInfo
 import cv2
 import numpy as np
 
-from detect_gear36 import DEFAULT_MESH, HERE, blue_gear_mask
+from detect_gear36 import HERE, color_gear_mask
+from gears import DEFAULT_GEAR, GEAR_COLORS, GEARS, check_gear_mesh, gear_mesh_path, hsv_ranges, yaw_symmetry
 from gx4m_real.camera.cloud import save_cloud
 from gx4m_real.camera.orbbec import OrbbecRGBDStream
 
@@ -30,7 +31,11 @@ def main(argv=None, observer=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--gpu', default='0')
     parser.add_argument('--device-index', type=int, default=0)
-    parser.add_argument('--mesh', type=Path, default=DEFAULT_MESH)
+    parser.add_argument('--gear', choices=sorted(GEARS), default=DEFAULT_GEAR)
+    parser.add_argument('--mesh', type=Path, help='Default: the simulation CAD mesh of --gear')
+    parser.add_argument('--hsv-low', type=int, nargs=3,
+                        help='OpenCV HSV range replacing the gear color (gear24 red, gear36 blue, gear48 yellow)')
+    parser.add_argument('--hsv-high', type=int, nargs=3)
     parser.add_argument('--register-iterations', type=int, default=5)
     parser.add_argument('--track-iterations', type=int, default=2)
     parser.add_argument('--max-frames', type=int, default=0, help='0 runs until q or Ctrl-C')
@@ -40,6 +45,8 @@ def main(argv=None, observer=None):
     parser.add_argument('--min-iou', type=float, default=.45)
     parser.add_argument('--max-depth-error', type=float, default=.02, help='Median depth residual in metres')
     args = parser.parse_args(argv)
+    args.mesh = args.mesh or gear_mesh_path(args.gear)
+    ranges = hsv_ranges(args.gear, args.hsv_low, args.hsv_high)
     if min(args.register_iterations, args.track_iterations) < 1 or args.max_frames < 0:
         parser.error('Iterations must be positive and max-frames nonnegative')
     if not 0 <= args.min_iou <= 1 or args.max_depth_error <= 0:
@@ -57,12 +64,8 @@ def main(argv=None, observer=None):
     output = args.output or HERE / 'outputs' / datetime.now(ZoneInfo('Asia/Shanghai')).strftime('live_%Y%m%d_%H%M%S_%f')
     output.mkdir(parents=True, exist_ok=False)
     mesh = trimesh.load(args.mesh, force='mesh')
-    if not .10 < float(mesh.extents[:2].max()) < .13:
-        raise ValueError('Expected a gear36 mesh in metres (approximately 114 mm diameter)')
-    symmetry = np.repeat(np.eye(4)[None], 36, axis=0)
-    for i, angle in enumerate(np.arange(36) * 2 * np.pi / 36):
-        c, s = np.cos(angle), np.sin(angle)
-        symmetry[i, :2, :2] = [[c, -s], [s, c]]
+    check_gear_mesh(mesh, args.gear)
+    symmetry = yaw_symmetry(args.gear)
     print(f'Loading FoundationPose on physical GPU {args.gpu}; output: {output}', flush=True)
     scorer, refiner = ScorePredictor(), PoseRefinePredictor()
     glctx = dr.RasterizeCudaContext()
@@ -76,7 +79,7 @@ def main(argv=None, observer=None):
     depth_errors = []
     sequence = -1
     latest = None
-    window = 'FoundationPose - gear36 | q quit | r reset | s save'
+    window = f'FoundationPose - {args.gear} | q quit | r reset | s save'
     if not args.no_display:
         cv2.namedWindow(window, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(window, 960, 720)
@@ -110,7 +113,7 @@ def main(argv=None, observer=None):
                 metrics = {'status': 'SEARCHING', 'mask_iou': None, 'median_depth_error_m': None}
                 bgr = cv2.cvtColor(frame.rgb, cv2.COLOR_RGB2BGR)
                 try:
-                    mask = blue_gear_mask(frame.rgb, frame.depth)
+                    mask = color_gear_mask(frame.rgb, frame.depth, ranges)
                 except ValueError:
                     mask = None
                     if estimator is not None:
@@ -126,7 +129,7 @@ def main(argv=None, observer=None):
                                                    symmetry_tfs=symmetry, scorer=scorer, refiner=refiner,
                                                    glctx=glctx, debug=0, debug_dir=str(output / 'debug'))
                     if estimator.pose_last is None:
-                        label(bgr, ['INITIALIZING - keep the blue gear visible', 'q quit | r reset | s snapshot'], False)
+                        label(bgr, [f'INITIALIZING - keep the {GEAR_COLORS[args.gear]} {args.gear} visible', 'q quit | r reset | s snapshot'], False)
                         if not args.no_display:
                             cv2.imshow(window, bgr)
                             key = cv2.waitKey(1) & 255
@@ -192,7 +195,7 @@ def main(argv=None, observer=None):
                 if mode == 'TRACK':
                     track_times.append(processing_ms)
                 xyz = 'XYZ (camera, mm): --' if pose is None else 'XYZ (camera, mm): ' + ', '.join(f'{x * 1000:.1f}' for x in pose[:3, 3])
-                info = f'IoU {metrics["mask_iou"]:.2f}' if metrics['mask_iou'] is not None else 'Show one blue gear'
+                info = f'IoU {metrics["mask_iou"]:.2f}' if metrics['mask_iou'] is not None else f'Show the {GEAR_COLORS[args.gear]} {args.gear}'
                 label(bgr, [f'{metrics["status"]} | {fps:.1f} FPS | {processing_ms:.0f} ms | {info}',
                             xyz, 'q quit | r reset | s snapshot'], pose is not None)
                 metrics.update(processing_ms=processing_ms, frame_age_ms=age_ms, fps=fps)

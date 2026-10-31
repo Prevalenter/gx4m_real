@@ -10,6 +10,7 @@ the policy runs. --plate shows a saved detect_plate.py result until then. It can
   2. Start: put gear24 flat on the table at the start spot, within the trained +-2 cm (any yaw).
 The check uses the median of the last 15 valid poses. step1 only uses the left pin, so a plate yaw about it is
 not visible through the gear (and does not matter for step1).
+Both checks are always shown: distance to the training pose cannot tell whether the gear is physically on a pin.
 
 Every pose is also forwarded over UDP (--target, as publish_gear_pose.py), so the same perception process keeps
 feeding run_step1.py after the check:
@@ -70,7 +71,7 @@ def placement_report(position, axis, reference):
     at_start = dict(dx=s[0], dy=s[1], dz=s[2], tilt=tilt_deg(axis, start_axis))
     at_start['ok'] = (max(abs(s[0]), abs(s[1])) <= START_XY and abs(s[2]) <= START_Z
                       and at_start['tilt'] <= START_TILT)
-    return dict(on_pin=pin['xy'] < .03 and abs(pin['dz']) < .02, pin=pin, start=at_start)
+    return dict(pin=pin, start=at_start)
 
 
 def plate_report(T_world_plate, reference):
@@ -90,7 +91,8 @@ def plate_report(T_world_plate, reference):
 def plate_markdown(report, note=''):
     mm = lambda v: f'{v*1000:+.1f} mm'
     r = report
-    return (f"**底板检测（{note}）** {'✅' if r['ok'] else '❌'}\n\n"
+    return (f"**底板已检测（{note}）**\n\n"
+            f"与训练位置对齐：{'✅' if r['ok'] else '❌'}\n\n"
             f"左销钉处水平偏差 {r['xy']*1000:.1f} mm（x {mm(r['dx'])}，y {mm(r['dy'])}；要求 ≤ {PIN_XY*1000:.0f} mm），"
             f"高度 {mm(r['dz'])}（≤ {PIN_Z*1000:.0f} mm），倾斜 {r['tilt']:.1f}°（≤ {PIN_TILT:.0f}°），"
             f"偏航 {r['yaw']:+.1f}°（step1 不要求）\n\n"
@@ -108,8 +110,8 @@ def report_markdown(report):
     start = (f"**2. 起点（齿轮平放在桌上）** {mark(s['ok'])}\n\n"
              f"x {mm(s['dx'])}，y {mm(s['dy'])}（各 ≤ ±{START_XY*1000:.0f} mm），高度 {mm(s['dz'])}"
              f"（≤ {START_Z*1000:.0f} mm），倾斜 {s['tilt']:.1f}°（≤ {START_TILT:.0f}°）\n\n")
-    head = '当前判断：齿轮在销钉上，检查底板。\n\n' if report['on_pin'] else '当前判断：齿轮不在销钉上，检查起点。\n\n'
-    return head + (pin + start if report['on_pin'] else start + pin)
+    head = '齿轮套在左销钉上时查看底板偏差；放在起点时查看起点偏差。\n\n'
+    return head + pin + start
 
 
 def mesh_handle(server, name, mesh, color, opacity, T):
@@ -132,33 +134,57 @@ class Step1Setup(SceneViewer):
         mesh_handle(self.server, '/sim/start_gear', gear, (240, 200, 40), .35, pose(r['object_pos'], r['object_quat']))
         scene.add_box('/sim/start_region', color=(240, 200, 40), dimensions=(.04, .04, .001), opacity=.3,
                       position=np.asarray(r['object_pos']) - [0, 0, .004])
-        scene.add_frame('/sim/preinsert', axes_length=.03, position=np.asarray(r['preinsert_pos']),
+        scene.add_frame('/sim/preinsert', axes_length=.08, axes_radius=.0006, origin_radius=.0012,
+                        position=np.asarray(r['preinsert_pos']),
                         wxyz=np.asarray(r['preinsert_quat']))
         scene.add_label('/sim/goal_label', '目标：左销钉', position=np.asarray(r['final_pos']) + [0, 0, .05])
         scene.add_label('/sim/start_label', '起点 ±2 cm', position=np.asarray(r['object_pos']) + [0, 0, .05])
         gui = self.server.gui
         gui.add_markdown('## step1 摆放检查\n半透明灰色：底板的训练位置；绿色：齿轮插好的目标；黄色：起点和 ±2 cm 范围。'
-                         '先把齿轮套在左销钉上对齐底板，再把齿轮放到起点。')
+                         '点击「检测底板」显示实际底板模型和坐标。')
         self.plate_report = None
+        self.T_world_plate = None
         self.detected_plate = mesh_handle(self.server, '/detected/plate', plate_mesh, (35, 35, 40), 1., np.eye(4))
         self.detected_plate.visible = False
+        self.plate_axes = scene.add_frame('/detected/plate_axes', axes_length=.15, axes_radius=.0006,
+                                          origin_radius=.0012, visible=False)
+        self.plate_label = scene.add_label('/detected/plate_label', '检测到的底板', visible=False)
         self.plate_check = gui.add_markdown('底板还没有检测，按下面的按钮检测一次。')
         self.plate_status = gui.add_markdown('')
         self.remeasure = threading.Event()
         gui.add_button('检测底板').on_click(lambda _: self.remeasure.set())
         if plate is not None:
             self.show_plate(plate['T_camera_plate'], f"已保存的结果，{plate.get('measured_at', '')}")
-        self.check = gui.add_markdown('等待齿轮位姿。')
+        with gui.add_folder('通过齿轮校验摆放（可选）'):
+            self.check = gui.add_markdown('等待齿轮位姿。')
         self.report = None
+
+    def configure_client_camera(self, client):
+        if getattr(self, 'T_world_plate', None) is None:
+            super().configure_client_camera(client)
+        else:
+            center = self.T_world_plate[:3, 3]
+            client.camera.position = center + [.55, -.70, .55]
+            client.camera.look_at = center
 
     def show_plate(self, T_camera_plate, note):
         with self.lock:
             T_world_plate = world_object(self.calibration, T_camera_plate)
+            self.T_world_plate = T_world_plate
             set_pose(self.detected_plate, T_world_plate)
             self.detected_plate.visible = True
+            set_pose(self.plate_axes, T_world_plate)
+            self.plate_axes.visible = True
+            self.plate_label.position = T_world_plate[:3, 3] + [0, 0, .05]
+            self.plate_label.visible = True
             self.plate_status.content = ''
             self.plate_report = plate_report(T_world_plate, self.ref)
-            self.plate_check.content = '黑色：检测到的底板。\n\n' + plate_markdown(self.plate_report, note)
+            self.plate_check.content = ('黑色：检测到的底板；细坐标轴：底板原点。\n\n'
+                f"底板世界坐标 XYZ：{T_world_plate[:3, 3].round(4).tolist()} m\n\n"
+                f"底板相机坐标 XYZ：{np.asarray(T_camera_plate)[:3, 3].round(4).tolist()} m\n\n"
+                + plate_markdown(self.plate_report, note))
+            for client in self.server.get_clients().values():
+                self.configure_client_camera(client)
 
     def update_plate(self, state):
         """Show a PlateDetector state. Until a new pose is fused the last one stays on screen."""
@@ -209,6 +235,16 @@ def plate_frame_hook(viewer, reference):
             state = detector.update(frame)
             if state is not None:
                 viewer.update_plate(state)
+                if state['status'] == 'DONE':
+                    result = dict(measured_at=time.strftime('%Y-%m-%dT%H:%M:%S%z'),
+                                  T_camera_plate=np.asarray(state['T_camera_plate']).tolist(),
+                                  T_world_plate=viewer.T_world_plate.tolist(),
+                                  spread=state['spread'], report=viewer.plate_report)
+                    (output / 'plate_result.json').write_text(json.dumps(result, indent=2, default=float) + '\n')
+                    print(f"Plate measured: {viewer.T_world_plate[:3, 3].round(4).tolist()} m; "
+                          f"saved {output / 'plate_result.json'}", flush=True)
+                elif state['status'] == 'FAILED':
+                    print(f"Plate detection failed: {state['reason']}", flush=True)
         return on_frame
     return build
 

@@ -13,7 +13,8 @@ HERE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HERE))
 from gears import GEARS, check_gear_mesh, gear_mesh_path, yaw_symmetry          # noqa: E402
 from detect_plate import PlateDetector, fuse_poses, mask_metrics, plate_mask, table_height  # noqa: E402
-from step1_setup import (REFERENCE, Step1Setup, median_pose, placement_report, plate_report, pose)  # noqa: E402
+from step1_setup import (REFERENCE, Step1Setup, median_pose, placement_report, plate_report, pose,
+                        report_markdown)  # noqa: E402
 from viser_scene import DEFAULT_INITIAL                                          # noqa: E402
 
 
@@ -53,7 +54,7 @@ class PlacementTests(unittest.TestCase):
         T = self.final.copy()
         T[:3, 3] += [.002, -.001, .001]
         r = self.report(T)
-        self.assertTrue(r['on_pin'] and r['pin']['ok'])
+        self.assertTrue(r['pin']['ok'])
         self.assertAlmostEqual(r['pin']['dx'], .002)
         T[:3, 3] += [.003, 0, 0]
         self.assertFalse(self.report(T)['pin']['ok'])
@@ -64,7 +65,6 @@ class PlacementTests(unittest.TestCase):
         T[:3, 3] += [.015, -.019, 0]
         T[:3, :3] = Rotation.from_euler('z', 77, degrees=True).as_matrix()     # any yaw
         r = self.report(T)
-        self.assertFalse(r['on_pin'])
         self.assertTrue(r['start']['ok'])
         T[:3, 3] += [.01, 0, 0]
         self.assertFalse(self.report(T)['start']['ok'])
@@ -78,6 +78,21 @@ class PlacementTests(unittest.TestCase):
         position, axis = median_pose(poses)
         np.testing.assert_allclose(position, self.final[:3, 3])
         np.testing.assert_allclose(axis, self.final[:3, 2])
+
+    def test_distant_plate_still_shows_pin_offsets_without_guessing_placement(self):
+        for offset in ([.2, -.15, 0], [0, 0, .05], [.2, -.15, .05]):
+            with self.subTest(offset=offset):
+                T = self.final.copy()
+                T[:3, 3] += offset
+                report = self.report(T)
+                np.testing.assert_allclose([report['pin'][k] for k in ('dx', 'dy', 'dz')], offset)
+                self.assertFalse(report['pin']['ok'])
+                content = report_markdown(report)
+                self.assertIn('底板按 x', content)
+                self.assertIn('**2. 起点', content)
+                self.assertLess(content.index('**1. 底板'), content.index('**2. 起点'))
+                self.assertNotIn('当前判断', content)
+                self.assertNotIn('齿轮不在销钉上', content)
 
     def test_viewer_checks_live_poses(self):
         initial = json.loads(DEFAULT_INITIAL.read_text())
@@ -123,6 +138,14 @@ class PlateTests(unittest.TestCase):
         mask, ignore = plate_mask(rgb, depth, K, T, table)
         self.assertEqual(mask.sum(), 200*200)
         self.assertTrue(mask[240, 320] and not mask[50, 50] and not ignore.any())
+
+    def test_mask_uses_measured_table_when_training_height_is_wrong(self):
+        rgb, depth, K, T, table = self.scene()
+        expected, _ = plate_mask(rgb, depth, K, T, table)
+        for offset in (-.15, .15):
+            with self.subTest(training_height_offset=offset):
+                mask, _ = plate_mask(rgb, depth, K, T, table + offset)
+                np.testing.assert_equal(mask, expected)
 
     def test_mask_ignores_gear_and_hand_height(self):
         rgb, depth, K, T, table = self.scene()
@@ -275,6 +298,9 @@ class PlateTests(unittest.TestCase):
                             initial=initial, port=0, live=True)
         try:
             self.assertTrue(viewer.plate_report['ok'] and viewer.detected_plate.visible)
+            self.assertTrue(viewer.plate_axes.visible and viewer.plate_label.visible)
+            np.testing.assert_allclose(viewer.plate_axes.position, self.trained[:3, 3])
+            self.assertIn('底板世界坐标 XYZ', viewer.plate_check.content)
             state = dict(status='MEASURING', reason='', fused=3, fuse_frames=5, T_camera_plate=T_cam, spread=None)
             viewer.update_plate(state)
             self.assertIn('检测中 3/5', viewer.plate_status.content)
@@ -283,6 +309,13 @@ class PlateTests(unittest.TestCase):
             viewer.update_plate({**state, 'status': 'DONE'})
             self.assertEqual(viewer.plate_status.content, '')
             self.assertIn('检测）', viewer.plate_check.content)
+            shifted = self.trained.copy()
+            shifted[:3, 3] += [.2, -.1, -.12]
+            viewer.show_plate(np.linalg.inv(C) @ shifted, '偏移测试')
+            self.assertFalse(viewer.plate_report['ok'])
+            self.assertTrue(viewer.detected_plate.visible and viewer.plate_axes.visible)
+            np.testing.assert_allclose(viewer.detected_plate.position, shifted[:3, 3])
+            self.assertIn('底板已检测', viewer.plate_check.content)
         finally:
             viewer.close()
 

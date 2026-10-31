@@ -2,8 +2,8 @@
 gear loop of step1_setup.py when its button is pressed, and main() here measures alone and saves plate_result.json.
 
 Several registrations are fused into one pose, which then stays until the next measurement. Registrations are spaced
-out so the gear keeps updating between them. The target mask is the black surface just above the table (height from
-the hand-eye calibration), minus gear-colored pixels. Those pixels, depth holes (common on black surfaces) and whatever
+out so the gear keeps updating between them. The target mask is the black surface just above the table plane fitted
+from the current RGB-D, minus gear-colored pixels. Those pixels, depth holes (common on black surfaces) and whatever
 is in front of the rendered plate are ignored when checking a pose, so a gear or the hand over the plate does not count
 as a mismatch.
 
@@ -53,13 +53,57 @@ def gear_pixels(rgb, grow=5):
     return cv2.dilate(pixels, np.ones((grow, grow), np.uint8)) > 0
 
 
-def plate_mask(rgb, depth, K, T_world_cam, table_z, band=BAND, value_max=BLACK_VALUE_MAX):
+def fit_table_plane(rgb, depth, K, T_world_cam, value_max=BLACK_VALUE_MAX):
+    """Fit the visible grey/white tabletop in camera coordinates, independently of training height."""
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    rows, cols = np.nonzero((depth > 0) & np.isfinite(depth) & (hsv[..., 1] < 80)
+                            & (hsv[..., 2] > value_max))
+    if len(rows) < 300:
+        raise ValueError('Too little visible tabletop depth; keep some grey/white tabletop in view')
+    rng = np.random.default_rng(0)
+    indices = rng.choice(len(rows), min(4000, len(rows)), replace=False)
+    rows, cols = rows[indices], cols[indices]
+    z = depth[rows, cols]
+    points = np.column_stack(((cols - K[0, 2]) / K[0, 0] * z,
+                              (rows - K[1, 2]) / K[1, 1] * z, z))
+    up = np.asarray(T_world_cam)[2, :3]
+    best = np.zeros(len(points), dtype=bool)
+    for _ in range(100):
+        a, b, c = points[rng.choice(len(points), 3, replace=False)]
+        normal = np.cross(b - a, c - a)
+        length = np.linalg.norm(normal)
+        if length < 1e-9:
+            continue
+        normal /= length
+        if abs(normal @ up) < np.cos(np.deg2rad(30)):
+            continue
+        inliers = np.abs((points - a) @ normal) < .004
+        if inliers.sum() > best.sum():
+            best = inliers
+    if best.sum() < max(300, .25 * len(points)):
+        raise ValueError('No consistent tabletop plane found in the current depth')
+    for _ in range(2):
+        center = points[best].mean(axis=0)
+        centered = points[best] - center
+        _, vectors = np.linalg.eigh(centered.T @ centered)
+        normal = vectors[:, 0]
+        if normal @ up < 0:
+            normal = -normal
+        distance = -normal @ center
+        best = np.abs(points @ normal + distance) < .004
+    if normal @ up < np.cos(np.deg2rad(30)):
+        raise ValueError('Measured tabletop normal disagrees with camera calibration')
+    return normal, distance
+
+
+def plate_mask(rgb, depth, K, T_world_cam, table_z=None, band=BAND, value_max=BLACK_VALUE_MAX):
     """The black non-gear region with the most depth inside the height band above the table, and the pixels to
-    ignore when checking a pose. Black pixels without depth stay in the region: they are holes in the plate's depth."""
+    ignore when checking a pose. Black pixels without depth stay in the region: they are holes in the plate's depth.
+    table_z is accepted for older callers; the current RGB-D supplies the table plane instead."""
     rows, cols = np.indices(depth.shape)
-    # World z of each pixel: the third row of T_world_cam applied to the back-projected camera point.
-    a, b, c, t = T_world_cam[2]
-    height = a*(cols - K[0, 2])/K[0, 0]*depth + b*(rows - K[1, 2])/K[1, 1]*depth + c*depth + t - table_z
+    normal, distance = fit_table_plane(rgb, depth, K, T_world_cam, value_max)
+    a, b, c = normal
+    height = (a*(cols - K[0, 2])/K[0, 0] + b*(rows - K[1, 2])/K[1, 1] + c)*depth + distance
     in_band = (depth > 0) & (height >= band[0]) & (height <= band[1])
     gears = gear_pixels(rgb)
     black = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)[..., 2] <= value_max
@@ -71,7 +115,7 @@ def plate_mask(rgb, depth, K, T_world_cam, table_z, band=BAND, value_max=BLACK_V
     votes = np.bincount(labels[in_band], minlength=count)
     votes[0] = 0
     if votes.max() == 0:
-        raise ValueError('No black surface found just above the table; check the calibration and that the plate is in view')
+        raise ValueError('No black surface found above the measured tabletop; keep the plate in view')
     mask = labels == int(np.argmax(votes))
     if int((mask & (depth > 0)).sum()) < MIN_DEPTH_PIXELS:
         raise ValueError('Too little valid depth on the black plate; change the lighting or the camera exposure')
@@ -140,7 +184,6 @@ class PlateDetector:
     def __init__(self, backend, reference, T_world_cam, *, every=5, fuse_frames=5, max_attempts=15, min_iou=.6,
                  max_depth_error=.01, value_max=BLACK_VALUE_MAX):
         self.backend, self.T_world_cam, self.every = backend, T_world_cam, every
-        self.table_z = table_height(reference)
         self.min_iou, self.max_depth_error, self.value_max = min_iou, max_depth_error, value_max
         self.fuse_frames, self.max_attempts = fuse_frames, max_attempts
         self.window, self.count, self.attempts = [], 0, 0
@@ -160,7 +203,7 @@ class PlateDetector:
     def _pose(self, frame):
         """A registered pose that passes the checks, or the reason there is none."""
         try:
-            mask, ignore = plate_mask(frame.rgb, frame.depth, frame.K, self.T_world_cam, self.table_z,
+            mask, ignore = plate_mask(frame.rgb, frame.depth, frame.K, self.T_world_cam,
                                       value_max=self.value_max)
         except ValueError as exc:
             return None, str(exc)

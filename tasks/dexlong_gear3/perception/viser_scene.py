@@ -117,16 +117,17 @@ class SceneViewer:
         self.server = viser.ViserServer(host=host, port=port, label='GX7 · 固定相机 · 零件位姿')
         self.server.scene.set_up_direction('+z')
         self.server.scene.add_grid('/ground', width=2, height=2, plane='xy')
-        self.server.scene.add_frame('/world', axes_length=.15)
-        base = self.server.scene.add_frame('/robot', axes_length=.1)
+        self.server.scene.add_frame('/world', axes_length=.22, axes_radius=.0006, origin_radius=.0012)
+        base = self.server.scene.add_frame('/robot', axes_length=.18, axes_radius=.0006, origin_radius=.0012)
         set_pose(base, calibration['T_world_base'] @ root_in_base)
         self.robot = ViserUrdf(self.server, self.model, root_node_name='/robot')
         self.robot.update_cfg(self.q)
-        camera = self.server.scene.add_frame('/camera', axes_length=.1)
+        camera = self.server.scene.add_frame('/camera', axes_length=.16, axes_radius=.0006, origin_radius=.0012)
         set_pose(camera, self.T_world_cam)
         self.frustum = self.server.scene.add_camera_frustum('/camera/frustum',
             fov=np.deg2rad(55), aspect=4/3, scale=.15, color=(255, 180, 40))
-        self.part = self.server.scene.add_frame('/part', axes_length=.07, visible=False)
+        self.part = self.server.scene.add_frame('/part', axes_length=.12, axes_radius=.0006,
+                                                origin_radius=.0012, visible=False)
         self.server.scene.add_mesh_trimesh('/part/gear', gear)
         gui = self.server.gui
         gui.add_markdown('## 固定相机与零件位姿\n' +
@@ -152,11 +153,14 @@ class SceneViewer:
                 slider.on_update(change)
         @self.server.on_client_connect
         def connected(client):
-            base_pos = calibration['T_world_base'][:3, 3]
-            client.camera.position = base_pos + [1., -1.3, .9]
-            client.camera.look_at = (base_pos + self.T_world_cam[:3, 3]) / 2
+            self.configure_client_camera(client)
         self.monitor = threading.Thread(target=self._monitor, daemon=True, name='viser-pose-expiry')
         self.monitor.start()
+
+    def configure_client_camera(self, client):
+        base_pos = self.calibration['T_world_base'][:3, 3]
+        client.camera.position = base_pos + [1., -1.3, .9]
+        client.camera.look_at = (base_pos + self.T_world_cam[:3, 3]) / 2
 
     def set_camera_metadata(self, metadata):
         expected = self.calibration.get('camera_metadata', {}).get('serial')

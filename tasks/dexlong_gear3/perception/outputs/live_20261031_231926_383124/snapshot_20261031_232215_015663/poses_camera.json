@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "exported_at": "2026-10-31T23:23:31.369032+08:00",
+  "snapshot_saved_at": "2026-10-31T23:22:15.015663+08:00",
+  "sequence": 4979,
+  "frame_received_at_monotonic": 810548.961571328,
+  "rgb_depth_timestamp_delta_ms": 0.158,
+  "same_rgbd_frame": true,
+  "frame": "camera optical: +X right, +Y down, +Z forward",
+  "translation_unit": "metre",
+  "rotation_convention": "quaternion_wxyz; matrix rotation maps object axes into camera frame",
+  "transform_convention": "p_camera = T_camera_object @ p_object; original CAD mesh object frames",
+  "gear_name": "gear24",
+  "T_camera_plate": [
+    [
+      -0.7610913027743166,
+      -0.6486349550373328,
+      -0.003567063920099811,
+      0.03802095353603363
+    ],
+    [
+      -0.20447009800561486,
+      0.2451314978541641,
+      -0.9476827147212021,
+      0.09514021128416061
+    ],
+    [
+      0.6155745347745203,
+      -0.7205437140545259,
+      -0.31919390387919655,
+      0.6170457005500793
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "T_camera_gear": [
+    [
+      0.6307373642921448,
+      0.7759725451469421,
+      -0.005961794871836901,
+      0.07257393002510071
+    ],
+    [
+      0.24508094787597656,
+      -0.2064812034368515,
+      -0.9472618699073792,
+      0.08800365775823593
+    ],
+    [
+      -0.7362842559814453,
+      0.5960084199905396,
+      -0.3204096555709839,
+      0.5817145109176636
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "plate": {
+    "translation_m": [
+      0.03802095353603363,
+      0.09514021128416061,
+      0.6170457005500793
+    ],
+    "translation_mm": [
+      38.02095353603363,
+      95.14021128416061,
+      617.0457005500793
+    ],
+    "quaternion_wxyz": [
+      -0.20300633684730798,
+      -0.2797191016228225,
+      0.762465852433353,
+      -0.5469839808077006
+    ]
+  },
+  "gear": {
+    "translation_m": [
+      0.07257393002510071,
+      0.08800365775823593,
+      0.5817145109176636
+    ],
+    "translation_mm": [
+      72.57393002510071,
+      88.00365775823593,
+      581.7145109176636
+    ],
+    "quaternion_wxyz": [
+      0.5253195954703039,
+      0.7344432403366361,
+      0.3475603377398451,
+      -0.2526544299411807
+    ]
+  },
+  "plate_quality": {
+    "sequence": 4979,
+    "mask_iou": 0.8936553085273118,
+    "median_depth_error_m": 0.0021665096282958984,
+    "visible_pixels": 16927,
+    "depth_pixels": 15807,
+    "object_in_camera": [
+      [
+        -0.761091411113739,
+        -0.6486350297927856,
+        -0.003567051375284791,
+        0.03802095353603363
+      ],
+      [
+        -0.20447008311748505,
+        0.2451314926147461,
+        -0.9476826786994934,
+        0.09514021128416061
+      ],
+      [
+        0.6155744791030884,
+        -0.720543622970581,
+        -0.31919386982917786,
+        0.6170457005500793
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ]
+  },
+  "gear_quality": {
+    "status": "TRACK",
+    "mask_iou": 0.8853842736561528,
+    "median_depth_error_m": 0.0018405318260192871
+  },
+  "files": {
+    "rgb": "rgb.png",
+    "rgbd": "rgbd.npz",
+    "gear_overlay": "overlay.png",
+    "plate_overlay": "plate_overlay.png",
+    "combined_overlay": "detections_overlay.png"
+  },
+  "rgb_processing": "Unannotated detection-input RGB, SDK depth aligned to color; both RGB and depth undistorted using color calibration. Not untouched sensor pixels.",
+  "K": [
+    [
+      459.9846496582031,
+      0.0,
+      325.5765075683594
+    ],
+    [
+      0.0,
+      460.0837707519531,
+      244.26318359375
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "calibration_source": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/he_20261030_235500_recalib_20261101_001/handeye_result.json"
+}

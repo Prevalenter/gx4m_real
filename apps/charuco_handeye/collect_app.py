@@ -144,8 +144,10 @@ class CollectApp:
         self.robot_frame = self.server.scene.add_frame('/robot', position=config.base_position,
                                                        wxyz=config.base_wxyz, show_axes=False)
         self.visual = ViserUrdf(self.server, model, root_node_name='/robot')
-        self.camera_axes = self.server.scene.add_frame('/calibrated_camera', axes_length=.06, visible=False)
-        self.board_axes = self.server.scene.add_frame('/calibrated_board', axes_length=.06, visible=False)
+        self.camera_axes = self.server.scene.add_frame('/calibrated_camera', axes_length=.06, axes_radius=.0012,
+                                                       visible=False)
+        self.board_axes = self.server.scene.add_frame('/calibrated_board', axes_length=.06, axes_radius=.0012,
+                                                      visible=False)
 
         gui = self.server.gui
         gui.add_markdown('## GX7 手眼标定采集\n**' + ('真机模式' if not self.driver.mock else

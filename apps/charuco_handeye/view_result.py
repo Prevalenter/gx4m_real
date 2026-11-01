@@ -48,8 +48,8 @@ class ResultViewer:
         self.server = viser.ViserServer(host=host, port=port, label='GX7 · ChArUco 标定结果')
         self.server.scene.set_up_direction('+z')
         self.server.scene.add_grid('/ground', width=2., height=2., plane='xy')
-        self.server.scene.add_frame('/world', axes_length=.15)
-        base = self.server.scene.add_frame('/robot', axes_length=.1)
+        self.server.scene.add_frame('/world', axes_length=.15, axes_radius=.003)
+        base = self.server.scene.add_frame('/robot', axes_length=.1, axes_radius=.002)
         set_pose(base, transform(self.result['T_world_base']))
         self.model = yourdfpy.URDF.load(str(urdf or self.result['urdf']), load_meshes=True)
         if self.model.base_link != self.result['base_link']:
@@ -57,14 +57,14 @@ class ResultViewer:
             root_in_base = self.model.get_transform(self.model.base_link, self.result['base_link'])
             set_pose(base, transform(self.result['T_world_base']) @ root_in_base)
         self.visual = ViserUrdf(self.server, self.model, root_node_name='/robot')
-        self.camera = self.server.scene.add_frame('/calibrated_camera', axes_length=.08)
+        self.camera = self.server.scene.add_frame('/calibrated_camera', axes_length=.08, axes_radius=.0016)
         w, h = self.result['image_size']
         K = np.asarray(self.result['K'])
         self.frustum = self.server.scene.add_camera_frustum('/calibrated_camera/frustum',
             fov=2 * np.arctan(h / (2 * K[1, 1])), aspect=w / h, scale=.15, color=(70, 170, 255))
-        self.flange = self.server.scene.add_frame('/flange', axes_length=.07)
-        self.board = self.server.scene.add_frame('/predicted_board', axes_length=.08)
-        self.observed = self.server.scene.add_frame('/observed_board', axes_length=.065)
+        self.flange = self.server.scene.add_frame('/flange', axes_length=.07, axes_radius=.0014)
+        self.board = self.server.scene.add_frame('/predicted_board', axes_length=.08, axes_radius=.0016)
+        self.observed = self.server.scene.add_frame('/observed_board', axes_length=.065, axes_radius=.0013)
         spec = self.result['board']
         if (spec['squares_x'], spec['squares_y'], spec['dictionary']) != (4, 5, 'DICT_4X4_50'):
             raise ValueError('Viewer board definition differs from calibration')

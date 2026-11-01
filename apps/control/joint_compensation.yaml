@@ -1,4 +1,6 @@
 version: 1
+# Zero offsets J3–J6 from pivot FK calibration (offsets model) on
+# fk_20261030_213630 + fk_20261030_222431; J1/J7 are unobservable, J2 (+0.001° ± 0.41°) kept at 0.
 joints:
   joint1:
     direction: -1
@@ -8,16 +10,16 @@ joints:
     offset_deg: 0.0
   joint3:
     direction: -1
-    offset_deg: 0.0
+    offset_deg: -1.7702
   joint4:
     direction: 1
-    offset_deg: 0.0
+    offset_deg: 3.0735
   joint5:
     direction: -1
-    offset_deg: 0.0
+    offset_deg: -2.195
   joint6:
     direction: -1
-    offset_deg: 0.0
+    offset_deg: -6.731
   joint7:
     direction: -1
     offset_deg: 0.0

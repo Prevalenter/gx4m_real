@@ -126,6 +126,8 @@ bash tasks/dexlong_gear3/perception/run_live.sh --gpu 0
 
 另外用录制 RGB-D 插入一帧全黑画面验证了丢失恢复：状态依次为配准、跟踪、搜索、重新配准、跟踪，搜索帧不输出旧位姿。该回放检查记录于 `runtime/logs/live-recovery-validation.log`。
 
+每帧的掩码、配准/跟踪和有效性检查在 `gear_tracker.py` 的 `GearTracker` 里，`live_gear36.py` 和 `gear_worker.py` 共用。`gear_worker.py`（`run_gear_worker.sh`）不打开相机：由别的进程（`apps/charuco_handeye/view_result.py --live --gear24`，它在 `gear3_control` 环境里同时读相机和关节）启动，经本机连接接收 RGB-D 帧、返回相机坐标系下的齿轮位姿；消息格式见 `gx4m_real/camera/frame_ipc.py`，不用 pickle，两端的 numpy 版本可以不同。
+
 ## Viser：机器人、固定相机与零件位姿
 
 新增 `viser_scene.py` / `run_viser.sh`，可同时显示 GX7 + GX4M 模型、固定相机坐标轴与视锥、检测到的 gear36 模型及其坐标轴。浏览器默认地址为 **http://127.0.0.1:8088**。

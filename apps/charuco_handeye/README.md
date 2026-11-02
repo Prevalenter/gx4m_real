@@ -163,13 +163,39 @@ bash apps/charuco_handeye/run.sh view \
 
 页面显示：
 
-- GX7 + GX4M 模型，关节姿态来自选中的样本。
+- GX7 模型，关节姿态来自选中的样本。标定链末端 `tip_link`（Link7）以下的 GX4M 灵巧手不显示。
 - 相机坐标轴与视锥，光轴沿相机坐标系 +Z。
 - 带 ChArUco 图案的板：由正运动学和标定结果预测的位置。
 - 粉色板轮廓：由该样本图像检测得到的位置，用来直观对比预测和检测是否一致。
 - 原始图像上的检测角点和预测投影，以及当前样本的残差、相机和板子的世界位置。
 
 拖动「样本」滑块，或打开「自动切换样本」，可以查看不同姿态。视锥是不含畸变的几何近似；像素叠加使用完整的内参和畸变。
+
+固定相机还可以叠加一次当前 RGB-D 采集的点云：
+
+```bash
+python apps/orbbec/capture_rgbd.py --output <新采集目录>
+bash apps/charuco_handeye/run.sh view --result <标定目录>/handeye_result.json \
+  --pointcloud <新采集目录> --port 8088
+```
+
+采集前关闭其他占用相机的程序。点云使用采集文件中的去畸变内参，在相机坐标系反投影后，经 `T_world_base @ T_base_cam` 放到机器人场景中；显示深度范围为 0.1–2 米，默认每隔 2 个像素采样，可用 `--cloud-stride 1` 显示完整密度。界面可切换点云和机器人显示。点云是静态快照，机器人默认显示最后一个标定样本的姿态，不读取电机反馈。
+
+也可以用 `--live` 实时显示（与 `--pointcloud` 二选一）：
+
+```bash
+bash apps/charuco_handeye/run.sh view --result <标定目录>/handeye_result.json --live --port 8088
+```
+
+点云来自 Orbbec 去畸变 RGB-D 流，默认每秒更新 5 次（`--cloud-hz`），相机序列号须与标定相机一致。机器人姿态来自只读关节查询：每 0.1 秒向各电机发送状态查询，不使能电机、不切换控制模式，电机原始角度按标定结果里记录的关节补偿换算为模型角，所以与该外参一致，不读取 `apps/control/joint_compensation.yaml`。CAN 和相机都是独占的：控制程序或采集程序运行时读不到，页面显示错误并每 2 秒重试，模型保持上次姿态。`--robot-config` 指定 CAN 配置（默认 `apps/control/config.yaml`），`--camera-device-index` 选择相机。
+
+实时模式加 `--gear24` 会同时用 FoundationPose 跟踪红色 24 齿齿轮：
+
+```bash
+bash apps/charuco_handeye/run.sh view --result <标定目录>/handeye_result.json --live --gear24 --port 8088
+```
+
+FoundationPose 需要 `foundationpose` 环境和一块 GPU（`--gear-gpu`，默认 0），所以查看器用 `tasks/dexlong_gear3/perception/run_gear_worker.sh` 另起一个进程（`gear_worker.py`），把最新的 RGB-D 帧经本机连接发过去、取回位姿；相机仍只由查看器打开。模型加载约半分钟，之后每帧约 0.1 秒。跟踪逻辑与 `live_gear36.py` 相同（`gear_tracker.py`）：按红色区域配准，逐帧跟踪，渲染轮廓与掩码的重叠率 ≥ 0.45 且深度残差中位数 ≤ 2 cm 才显示齿轮。齿轮挂在标定相机坐标系下，所以和点云用同一个外参；页面显示它的世界和相机坐标，「重新检测齿轮」强制重新配准。工作进程失败时页面显示原因，2 秒后重启它。
 
 ## 测试与数据质量
 

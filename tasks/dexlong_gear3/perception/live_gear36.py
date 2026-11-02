@@ -14,7 +14,8 @@ from zoneinfo import ZoneInfo
 import cv2
 import numpy as np
 
-from detect_gear36 import HERE, color_gear_mask
+from detect_gear36 import HERE
+from gear_tracker import GearTracker
 from gears import DEFAULT_GEAR, GEAR_COLORS, GEARS, check_gear_mesh, gear_mesh_path, hsv_ranges, yaw_symmetry
 from gx4m_real.camera.cloud import save_cloud
 from gx4m_real.camera.orbbec import OrbbecRGBDStream
@@ -56,8 +57,8 @@ def main(argv=None, observer=None, frame_hook=None):
     os.environ.setdefault('OMP_NUM_THREADS', '4')
     import torch
     import trimesh
-    from estimater import FoundationPose, ScorePredictor, PoseRefinePredictor
-    from Utils import dr, nvdiffrast_render, draw_xyz_axis, draw_posed_3d_box
+    from estimater import ScorePredictor, PoseRefinePredictor
+    from Utils import dr
 
     logging.getLogger().setLevel(logging.WARNING)
     if not torch.cuda.is_available() or torch.cuda.device_count() != 1:
@@ -71,10 +72,12 @@ def main(argv=None, observer=None, frame_hook=None):
     scorer, refiner = ScorePredictor(), PoseRefinePredictor()
     glctx = dr.RasterizeCudaContext()
     on_frame = frame_hook(scorer, refiner, glctx, output) if frame_hook is not None else None
-    estimator = None
+    tracker = GearTracker(mesh, symmetry, ranges, scorer=scorer, refiner=refiner, glctx=glctx,
+                          debug_dir=output / 'debug', register_iterations=args.register_iterations,
+                          track_iterations=args.track_iterations, min_iou=args.min_iou,
+                          max_depth_error=args.max_depth_error)
     writer = None
     frame_count = accepted = registrations = tracks = 0
-    bad_frames = 0
     durations = deque(maxlen=30)
     track_times = []
     ious = []
@@ -111,84 +114,24 @@ def main(argv=None, observer=None, frame_hook=None):
                 frame = camera.read(after=sequence)
                 sequence = frame.sequence
                 start = time.monotonic()
-                pose = None
-                metrics = {'status': 'SEARCHING', 'mask_iou': None, 'median_depth_error_m': None}
                 bgr = cv2.cvtColor(frame.rgb, cv2.COLOR_RGB2BGR)
-                try:
-                    mask = color_gear_mask(frame.rgb, frame.depth, ranges)
-                except ValueError:
-                    mask = None
-                    if estimator is not None:
-                        estimator.pose_last = None
-                    bad_frames = 0
+                mask = tracker.mask(frame)
+                if mask is not None and tracker.registering:
+                    label(bgr, [f'INITIALIZING - keep the {GEAR_COLORS[args.gear]} {args.gear} visible', 'q quit | r reset | s snapshot'], False)
+                    if not args.no_display:
+                        cv2.imshow(window, bgr)
+                        key = cv2.waitKey(1) & 255
+                        if key in (ord('q'), 27):
+                            break
+                pose, metrics, mode, rgb_overlay = tracker.step(frame, mask)
+                registrations += mode == 'REGISTER'
+                tracks += mode == 'TRACK'
+                if pose is not None:
+                    accepted += 1
+                    ious.append(metrics['mask_iou'])
+                    depth_errors.append(metrics['median_depth_error_m'])
+                    bgr = cv2.cvtColor(rgb_overlay, cv2.COLOR_RGB2BGR)
 
-                mode = 'SEARCHING'
-                if mask is not None:
-                    if estimator is None:
-                        color = np.median(frame.rgb[mask], axis=0).astype(np.uint8)
-                        mesh.visual.vertex_colors = np.tile(np.r_[color, 255], (len(mesh.vertices), 1))
-                        estimator = FoundationPose(mesh.vertices, mesh.vertex_normals, mesh=mesh,
-                                                   symmetry_tfs=symmetry, scorer=scorer, refiner=refiner,
-                                                   glctx=glctx, debug=0, debug_dir=str(output / 'debug'))
-                    if estimator.pose_last is None:
-                        label(bgr, [f'INITIALIZING - keep the {GEAR_COLORS[args.gear]} {args.gear} visible', 'q quit | r reset | s snapshot'], False)
-                        if not args.no_display:
-                            cv2.imshow(window, bgr)
-                            key = cv2.waitKey(1) & 255
-                            if key in (ord('q'), 27):
-                                break
-                        pose = estimator.register(K=frame.K, rgb=frame.rgb, depth=frame.depth,
-                                                  ob_mask=mask, iteration=args.register_iterations)
-                        mode = 'REGISTER'
-                        registrations += 1
-                        if estimator.pose_last is None:
-                            estimator.pose_last = None
-                            pose = None
-                    else:
-                        pose = estimator.track_one(rgb=frame.rgb, depth=frame.depth, K=frame.K,
-                                                   iteration=args.track_iterations)
-                        mode = 'TRACK'
-                        tracks += 1
-                    if pose is not None and np.isfinite(pose).all() and pose[2, 3] > 0:
-                        # Render the centered mesh at its matching centered pose.
-                        centered = pose @ np.linalg.inv(estimator.get_tf_to_centered_mesh().cpu().numpy())
-                        _, rendered, _ = nvdiffrast_render(
-                            K=frame.K, H=frame.depth.shape[0], W=frame.depth.shape[1],
-                            ob_in_cams=torch.as_tensor(centered[None], dtype=torch.float32, device='cuda'),
-                            glctx=glctx, mesh_tensors=estimator.mesh_tensors)
-                        rendered = rendered[0].cpu().numpy()
-                        silhouette = rendered > 0
-                        overlap = silhouette & mask & (frame.depth > 0)
-                        iou = float((silhouette & mask).sum() / max(int((silhouette | mask).sum()), 1))
-                        error = float(np.median(np.abs(rendered[overlap] - frame.depth[overlap]))) if overlap.any() else None
-                        valid = iou >= args.min_iou and error is not None and error <= args.max_depth_error
-                        metrics.update(mask_iou=iou, median_depth_error_m=error)
-                        if valid:
-                            bad_frames = 0
-                            accepted += 1
-                            ious.append(iou)
-                            depth_errors.append(error)
-                            rgb_overlay = frame.rgb.copy()
-                            contours, _ = cv2.findContours(silhouette.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                            cv2.drawContours(rgb_overlay, contours, -1, (0, 255, 0), 1)
-                            rgb_overlay = draw_posed_3d_box(frame.K, img=rgb_overlay, ob_in_cam=pose, bbox=mesh.bounds)
-                            rgb_overlay = draw_xyz_axis(rgb_overlay, ob_in_cam=pose, scale=.04,
-                                                        K=frame.K, thickness=2, is_input_rgb=True)
-                            bgr = cv2.cvtColor(rgb_overlay, cv2.COLOR_RGB2BGR)
-                            metrics['status'] = mode
-                        else:
-                            pose = None
-                            bad_frames += 1
-                            metrics['status'] = 'LOST - reacquiring'
-                            if mode == 'REGISTER' or bad_frames >= 3:
-                                estimator.pose_last = None
-                                bad_frames = 0
-                    else:
-                        estimator.pose_last = None
-                        pose = None
-                        metrics['status'] = 'LOST - reacquiring'
-
-                torch.cuda.synchronize()
                 processing_ms = (time.monotonic() - start) * 1000
                 age_ms = (time.monotonic() - frame.received_at) * 1000
                 now = time.monotonic()
@@ -227,8 +170,8 @@ def main(argv=None, observer=None, frame_hook=None):
                     key = cv2.waitKey(1) & 255
                     if key in (ord('q'), 27) or cv2.getWindowProperty(window, cv2.WND_PROP_VISIBLE) < 1:
                         break
-                    if key == ord('r') and estimator is not None:
-                        estimator.pose_last = None
+                    if key == ord('r'):
+                        tracker.reset()
                     if key == ord('s'):
                         save_snapshot(*latest)
             (output / 'camera.json').write_text(json.dumps(camera.metadata, indent=2) + '\n')

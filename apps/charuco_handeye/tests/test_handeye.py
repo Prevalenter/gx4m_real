@@ -5,6 +5,7 @@ from pathlib import Path
 import socket
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
@@ -16,14 +17,14 @@ HERE = Path(__file__).resolve().parents[1]
 ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE))
 from board import make_board
-from gx4m_real.camera.frames import ColorFrame
+from gx4m_real.camera.frames import ColorFrame, RGBDFrame
 from gx4m_real.robot.compensation import JointCompensation
 from gx4m_real.robot.config import load_config
 from handeye_session import DEFAULT_URDF, JOINTS, SessionWriter, camera_parameters, load_session
 from robot import UrdfChainFK
 from solve_handeye import inv, rot_deg
 from solve_session import calibrate_session, check_motion
-from view_result import ResultViewer, poses_for_sample
+from view_result import GearWorker, ResultViewer, load_pointcloud_capture, poses_for_sample
 
 CONTROL_CONFIG = ROOT / 'apps/control/config.yaml'
 # Same directions as the real arm, plus offsets, so FK on raw motor angles would fail the tests.
@@ -32,6 +33,28 @@ K = np.array([[1000., 0, 640], [0, 1000., 480], [0, 0, 1]])
 SIZE = (1280, 960)
 BOARD_IMAGE = make_board().generateImage((720, 900))
 BOARD_OUTLINE = np.array([[0, 0, 0], [.18, 0, 0], [.18, .225, 0], [0, .225, 0]], dtype=float)
+# Stands in for tasks/dexlong_gear3/perception/gear_worker.py: same protocol, gear at the frame's max depth.
+FAKE_GEAR_WORKER = '''
+import os, sys
+sys.path.insert(0, {root!r})
+from multiprocessing.connection import Listener
+import numpy as np
+from gx4m_real.camera.frame_ipc import receive, send
+key = bytes.fromhex(os.environ['GEAR_WORKER_AUTHKEY'])
+with Listener(('127.0.0.1', int(os.environ['GEAR_WORKER_PORT'])), authkey=key) as listener, listener.accept() as c:
+    send(c, {{'type': 'ready'}})
+    while True:
+        try:
+            header, arrays = receive(c)
+        except EOFError:
+            break
+        if header['type'] == 'frame':
+            pose = np.eye(4)
+            pose[2, 3] = float(arrays[1].max())
+            send(c, {{'type': 'pose', 'sequence': header['sequence'], 'status': 'TRACK', 'mode': 'TRACK',
+                      'mask_iou': .9, 'median_depth_error_m': .001, 'processing_ms': 1.,
+                      'object_in_camera': pose.tolist()}})
+'''
 
 
 def free_port():
@@ -209,11 +232,84 @@ class CollectToSolveTests(CollectorCase):
                     viewer.refresh()
                     self.assertIn('相机世界位置', viewer.details.content)
                     self.assertEqual(viewer.image.image.shape[:2], (SIZE[1], SIZE[0]))
+                    self.assertIn('Link7', viewer.model.link_map)
+                    self.assertFalse([name for name in viewer.model.link_map if name.startswith('gx4m_')])
                 finally:
                     viewer.server.stop()
+                if mode == 'eye-to-hand':
+                    self.check_live_viewer(root / 'result' / 'handeye_result.json', sample)
                 if mode == 'eye-in-hand':
                     self.assertNotIn('T_base_cam', result)
                     self.assertFalse((root / 'result' / 'T_RC.npy').exists())
+
+    def check_live_viewer(self, result_path, sample):
+        """Live mode maps raw motor feedback with the result's compensation and streams the cloud."""
+        stop = threading.Event()
+        depth = np.zeros((4, 6))
+        depth[1:3, 2:5] = 1.
+        frame = RGBDFrame(3, np.full((4, 6, 3), 200, np.uint8), depth, K, 0., 0.)
+
+        class Source:
+            """Context manager whose first read() returns value and stops the loop."""
+            metadata = {}
+
+            def __init__(self, value=None):
+                self.value = value
+
+            def __enter__(self):
+                if self.value is None:
+                    stop.set()
+                    raise TimeoutError('no CAN reply')
+                return self
+
+            def __exit__(self, *_):
+                pass
+
+            def read(self, after=-1, timeout=5):
+                stop.set()
+                return self.value
+
+        motor = sample['motor_positions_rad']
+        worker = Path(tempfile.mkdtemp()) / 'fake_gear_worker.py'
+        worker.write_text(FAKE_GEAR_WORKER.format(root=str(ROOT)))
+        viewer = ResultViewer(result_path, port=0, live=True, cloud_stride=1,
+                              camera_factory=lambda: Source(frame), reader_factory=lambda: Source(np.array(motor)),
+                              gear_factory=lambda cancel: GearWorker([sys.executable, str(worker)], cancel=cancel,
+                                                                     startup_timeout=30))
+        try:
+            self.assertFalse(viewer.show_boards.value)
+            viewer._joint_loop(stop)
+            np.testing.assert_allclose(viewer.live_q, COMPENSATION.to_model(motor))
+            np.testing.assert_allclose(viewer.live_q, sample['positions_rad'])
+            self.assertIn('J1', viewer.joint_status.content)
+            stop.clear()
+            viewer._cloud_loop(stop)
+            self.assertEqual(viewer.cloud.points.shape, (6, 3))
+            np.testing.assert_allclose(viewer.cloud.points[:, 2], 1.)
+            self.assertIn('第 3 帧', viewer.cloud_status.content)
+            stop.clear()
+            viewer.reader_factory = Source
+            viewer._joint_loop(stop)
+            self.assertIn('关节读取失败', viewer.joint_status.content)
+            np.testing.assert_allclose(viewer.live_q, sample['positions_rad'])
+            # The cloud loop handed its frame to the gear tracker; the fake worker puts the gear at the max depth.
+            self.assertIs(viewer.latest_frame, frame)
+            stop.clear()
+            thread = threading.Thread(target=viewer._gear_loop, args=(stop,))
+            thread.start()
+            deadline = time.monotonic() + 30
+            while not viewer.gear.visible and time.monotonic() < deadline:
+                time.sleep(.05)
+            stop.set()
+            thread.join(timeout=15)
+            self.assertFalse(thread.is_alive())
+            self.assertTrue(viewer.gear.visible, viewer.gear_status.content)
+            np.testing.assert_allclose(viewer.gear.position, [0, 0, 1.])
+            self.assertIn('世界坐标', viewer.gear_status.content)
+        finally:
+            viewer.server.stop()
+            worker.unlink()
+            worker.parent.rmdir()
 
 
 class RejectionTests(CollectorCase):
@@ -269,6 +365,9 @@ class SessionTests(unittest.TestCase):
             loaded = load_session(root / 's', allow_synthetic=True, compensation=root / 'newer.yaml')
             self.assertEqual(loaded['compensation_source'], str(root / 'newer.yaml'))
             np.testing.assert_allclose(loaded['samples'][0]['positions_rad'], newer.to_model([.1] * 7))
+            JointCompensation(COMPENSATION.directions, (0.,) * 7).save(root / 'zero.yaml')
+            loaded = load_session(root / 's', allow_synthetic=True, compensation=root / 'zero.yaml')
+            np.testing.assert_allclose(loaded['samples'][0]['positions_rad'], np.array(COMPENSATION.directions) * .1)
             JointCompensation().save(root / 'wrong.yaml')
             with self.assertRaisesRegex(ValueError, 'directions differ'):
                 load_session(root / 's', allow_synthetic=True, compensation=root / 'wrong.yaml')
@@ -291,6 +390,27 @@ class SessionTests(unittest.TestCase):
 
 
 class GeometryTests(unittest.TestCase):
+    def test_capture_cloud_matches_pixels_in_camera_frame(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            metadata = {'undistorted': True, 'depth_unit': 'metre'}
+            (root / 'capture.json').write_text(json.dumps(metadata))
+            rgb = np.arange(36, dtype=np.uint8).reshape(3, 4, 3)
+            depth = np.zeros((3, 4))
+            depth[1, 2], depth[2, 0] = 1., 2.
+            depth[0] = [np.nan, np.inf, -.5, 3.]
+            K = np.array([[2., 0., 1.], [0., 4., 1.], [0., 0., 1.]])
+            np.savez(root / 'rgbd.npz', rgb=rgb, depth=depth, K=K)
+            points, colors, _, _ = load_pointcloud_capture(root, stride=1)
+            np.testing.assert_allclose(points, [[.5, 0., 1.], [-1., .5, 2.]])
+            np.testing.assert_array_equal(colors, rgb[[1, 2], [2, 0]])
+            with self.assertRaisesRegex(ValueError, 'stride'):
+                load_pointcloud_capture(root, stride=0)
+            metadata['undistorted'] = False
+            (root / 'capture.json').write_text(json.dumps(metadata))
+            with self.assertRaisesRegex(ValueError, 'undistorted'):
+                load_pointcloud_capture(root)
+
     def test_fk_matches_control_urdf(self):
         import yourdfpy
         model = yourdfpy.URDF.load(str(DEFAULT_URDF), load_meshes=False)

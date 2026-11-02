@@ -1,0 +1,227 @@
+[
+  {
+    "index": 0,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000000.png",
+    "validation": false,
+    "n_corners": 12,
+    "reproj_px": 0.1525681297491354,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 1,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000001.png",
+    "validation": false,
+    "n_corners": 11,
+    "reproj_px": 0.11566189206042508,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 2,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000002.png",
+    "validation": false,
+    "n_corners": 9,
+    "reproj_px": 0.1615710778555179,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 3,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000003.png",
+    "validation": false,
+    "n_corners": 12,
+    "reproj_px": 0.18744797443130676,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 4,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000004.png",
+    "validation": false,
+    "n_corners": 9,
+    "reproj_px": 0.09526603272714758,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 5,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000005.png",
+    "validation": false,
+    "n_corners": 9,
+    "reproj_px": 0.14276941926497277,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 6,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000006.png",
+    "validation": false,
+    "n_corners": 6,
+    "reproj_px": 0.060108755570796056,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 7,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000007.png",
+    "validation": false,
+    "n_corners": 12,
+    "reproj_px": 0.16760287358411818,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 8,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000008.png",
+    "validation": false,
+    "n_corners": 11,
+    "reproj_px": 0.11806995471517029,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 9,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000009.png",
+    "validation": false,
+    "n_corners": 11,
+    "reproj_px": 0.12385451256440563,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 10,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000010.png",
+    "validation": false,
+    "n_corners": 12,
+    "reproj_px": 0.14920408044736344,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 11,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000011.png",
+    "validation": false,
+    "n_corners": 11,
+    "reproj_px": 0.08680130059311862,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 12,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000012.png",
+    "validation": false,
+    "n_corners": 11,
+    "reproj_px": 0.11791340671613523,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 13,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000013.png",
+    "validation": false,
+    "n_corners": 9,
+    "reproj_px": 0.07883345690448817,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 14,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000014.png",
+    "validation": false,
+    "n_corners": 9,
+    "reproj_px": 0.14115063002771794,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 15,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000015.png",
+    "validation": false,
+    "n_corners": 12,
+    "reproj_px": 0.2238886780039903,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 16,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000016.png",
+    "validation": false,
+    "n_corners": 8,
+    "reproj_px": 0.17295899333468556,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 17,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000017.png",
+    "validation": false,
+    "n_corners": 7,
+    "reproj_px": 0.0975640604239036,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 18,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000018.png",
+    "validation": false,
+    "n_corners": 6,
+    "reproj_px": 0.10883545160223147,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 19,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000019.png",
+    "validation": false,
+    "n_corners": 7,
+    "reproj_px": 0.057547925733827734,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 20,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000020.png",
+    "validation": false,
+    "n_corners": 6,
+    "reproj_px": 0.09455098774081376,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 21,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000021.png",
+    "validation": false,
+    "n_corners": 12,
+    "reproj_px": 0.15516710764968308,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 22,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000022.png",
+    "validation": false,
+    "n_corners": 9,
+    "reproj_px": 0.0868315742136537,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 23,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000023.png",
+    "validation": false,
+    "n_corners": 9,
+    "reproj_px": 0.16194524076191624,
+    "accepted": true,
+    "reason": "accepted"
+  },
+  {
+    "index": 24,
+    "image_path": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/sessions/he_20261102_185319/images/000024.png",
+    "validation": false,
+    "n_corners": 12,
+    "reproj_px": 0.1319516958820164,
+    "accepted": true,
+    "reason": "accepted"
+  }
+]

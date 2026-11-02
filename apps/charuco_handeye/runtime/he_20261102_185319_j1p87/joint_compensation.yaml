@@ -1,0 +1,25 @@
+version: 1
+# Accepted 2026-11-02 for calibration/: control compensation (J4 = 0) plus J1 = +8.7 deg, the rotation that levels the measured table on the base plate for session he_20261102_185319.
+# The extrinsic is only consistent with control when apps/control/joint_compensation.yaml also has J1 = +8.7.
+joints:
+  joint1:
+    direction: -1
+    offset_deg: 8.7
+  joint2:
+    direction: 1
+    offset_deg: 0.0
+  joint3:
+    direction: -1
+    offset_deg: -1.7702
+  joint4:
+    direction: 1
+    offset_deg: 0.0
+  joint5:
+    direction: -1
+    offset_deg: -2.195
+  joint6:
+    direction: -1
+    offset_deg: -6.731
+  joint7:
+    direction: -1
+    offset_deg: 0.0

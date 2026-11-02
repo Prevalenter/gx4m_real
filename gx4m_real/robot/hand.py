@@ -30,6 +30,9 @@ GOAL_PWM, GOAL_CURRENT, GOAL_POSITION, PRESENT_POSITION = 100, 102, 116, 132
 CURRENT_BASED_POSITION = 5
 DEG_PER_UNIT = .087891
 OFFSET_DEG = 90.
+# Sync-read replies come one after another, each after the motor's 500 us return delay (register 9 = 250):
+# about 12 ms for 16 motors measured at 1 Mbps, while the SDK waits only about 6 ms for all of them.
+SYNC_READ_TIMEOUT_MS = 30.
 
 
 def load_hand_config(path=CONFIG_PATH):
@@ -110,7 +113,10 @@ class DynamixelBus:
             self._write(1, i, TORQUE_ENABLE, int(bool(on)))
 
     def read(self):
-        result = self.reader.txRxPacket()
+        result = self.reader.txPacket()
+        if result == self.sdk.COMM_SUCCESS:
+            self.port.setPacketTimeoutMillis(SYNC_READ_TIMEOUT_MS)
+            result = self.reader.rxPacket()
         if result != self.sdk.COMM_SUCCESS:
             raise RuntimeError(f'Sync read of the hand positions: {self.packet.getTxRxResult(result)}')
         units = []
@@ -129,6 +135,10 @@ class DynamixelBus:
         result = self.writer.txPacket()
         if result != self.sdk.COMM_SUCCESS:
             raise RuntimeError(f'Sync write of the hand goals: {self.packet.getTxRxResult(result)}')
+
+    def close_port(self):
+        """Close the port without touching any motor (torque stays as it is)."""
+        self.port.closePort()
 
     def close(self):
         """Attempt torque-off on every motor even if one fails, then close the port."""
@@ -253,6 +263,37 @@ class HandDriver:
         return self
 
     def __exit__(self, *exc):
+        self.close()
+
+
+class HandFeedbackReader:
+    """Read-only hand joint angles (16,) rad: sync reads only, never writes a register, so torque, mode and
+    limits stay as they are. A context manager, or open() / read() / close(). Linux does not lock serial
+    ports, so do not read while another program drives the hand on the same port."""
+
+    def __init__(self, port=None, *, serial_number=None, config_path=CONFIG_PATH, sdk=None):
+        self.config = load_hand_config(config_path)
+        self.port = resolve_port(port, serial_number)
+        self.sdk, self.bus = sdk, None
+
+    def open(self):
+        c = self.config
+        self.bus = DynamixelBus(self.port, c['ids'], c['baudrate'], c['protocol'], sdk=self.sdk)
+        return self
+
+    __enter__ = open
+
+    def read(self):
+        if self.bus is None:
+            raise RuntimeError('Hand reader is not open')
+        return units_to_urdf(self.bus.read(), self.config['directions'])
+
+    def close(self):
+        bus, self.bus = self.bus, None
+        if bus is not None:
+            bus.close_port()
+
+    def __exit__(self, *_):
         self.close()
 
 

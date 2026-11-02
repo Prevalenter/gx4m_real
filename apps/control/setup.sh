@@ -18,6 +18,7 @@ python -m pip install -r "${CONTROL_DIR}/requirements.txt"
 # Only the native SDK is used; its Open3D/OpenCV/GUI demo dependencies are unnecessary.
 python -m pip install --no-deps pyorbbecsdk2==2.1.2
 python -m pip install --no-deps -e "${CONTROL_DIR}/../../third_party/libgx7"
+python -m pip install --no-deps -e "${CONTROL_DIR}/../../third_party/gex16"
 python -m pip install --no-deps -e "${CONTROL_DIR}/../.."
 python -m pip freeze > "${CONTROL_DIR}/runtime/pip-freeze.txt"
 printf 'Ready: bash %s/run.sh\n' "${CONTROL_DIR}"

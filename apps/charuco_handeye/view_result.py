@@ -24,6 +24,7 @@ from board import make_board
 from gx4m_real.camera.cloud import unproject
 from gx4m_real.camera.frame_ipc import receive, send
 from gx4m_real.robot.compensation import JointCompensation
+from gx4m_real.robot.hand import HAND_JOINTS, HandFeedbackReader
 from handeye_session import transform
 from solve_handeye import project
 
@@ -33,6 +34,8 @@ GEAR_WORKER = ROOT / 'tasks/dexlong_gear3/perception/run_gear_worker.sh'
 # Mesh origin and axes are the simulated gear's (tasks/dexlong_gear3/perception/gears.py).
 GEAR24_MESH = ROOT / 'asset/mjfit_gears3_split/assembly/gear24_visual.obj'
 JOINT_PERIOD_SEC = .1
+HAND_PERIOD_SEC = .05  # A 16-motor sync read takes about 12 ms.
+TACTILE_PERIOD_SEC = .1  # A 135-point frame plus the total force takes about 7 ms per sensor.
 RETRY_SEC = 2.
 
 
@@ -102,6 +105,32 @@ def without_links_below(model, link, mesh_dir):
 def orbbec_stream(device_index):
     from gx4m_real.camera.orbbec import OrbbecRGBDStream
     return OrbbecRGBDStream(device_index)
+
+
+def paxini_labels(serial_numbers=None):
+    """{label: port} of the given USB serial numbers, or of every PaXini port found; finger order, thumb first."""
+    from gx4m_real.robot.tactile import FINGERS, find_ports
+    order = list(FINGERS)
+    ports = sorted(find_ports(serial_numbers).items(),
+                   key=lambda item: (order.index(item[0]) if item[0] in order else len(order), item[0]))
+    return {f"**{FINGERS.get(serial_number, '未知手指')}**（{serial_number}，{port}）": port
+            for serial_number, port in ports}
+
+
+def paxini_sensors(serial_numbers=None):
+    """{label: open PaXiniL3530} of the given USB serial numbers, or of every PaXini port found."""
+    from gx4m_real.robot.tactile import PaXiniL3530
+    sensors = {}
+    try:
+        for label, port in paxini_labels(serial_numbers).items():
+            sensors[label] = PaXiniL3530(port)
+    except BaseException:
+        for sensor in sensors.values():
+            sensor.close()
+        raise
+    if not sensors:
+        raise RuntimeError('没有找到 PaXini 触觉传感器')
+    return sensors
 
 
 def joint_reader(robot_config):
@@ -179,13 +208,17 @@ class GearWorker:
 
 class ResultViewer:
     """Calibration samples, plus either one RGB-D capture or (live=True) the streaming cloud and
-    read-only joint feedback. live needs camera_factory() and reader_factory() returning unopened
-    context managers: an RGB-D stream with read(after, timeout) and a joint reader with read().
-    In live mode gear_factory(stop) adds the gear24 pose: an unopened GearWorker-like context manager."""
+    read-only joint feedback. live needs reader_factory() and optionally camera_factory() (no camera: no
+    cloud), returning unopened context managers: a joint reader with read() and an RGB-D stream with
+    read(after, timeout). In live mode gear_factory(stop) adds the gear24 pose (an unopened GearWorker-like
+    context manager, needs the camera), hand_factory() the dexterous hand with its read-only angles
+    (a reader with read() -> 16 URDF radians; without it the hand is not drawn) and tactile_factory()
+    the fingertip values ({label: open sensor with read_frame(), read_total() and close()}); every 2 s
+    tactile_labels(), when given, lists the labels now available, and a change reopens the sensors."""
 
     def __init__(self, result_path, *, host='127.0.0.1', port=8087, urdf=None,
                  pointcloud=None, cloud_stride=2, live=False, camera_factory=None, reader_factory=None,
-                 cloud_hz=5., gear_factory=None):
+                 cloud_hz=5., gear_factory=None, hand_factory=None, tactile_factory=None, tactile_labels=None):
         self.result = json.loads(Path(result_path).read_text())
         self.samples = self.result['samples']
         if not self.samples:
@@ -196,10 +229,12 @@ class ResultViewer:
             raise ValueError('A current point cloud requires fixed-camera (eye-to-hand) calibration')
         if pointcloud is not None and live:
             raise ValueError('Choose either a captured point cloud or live mode')
-        if live and (camera_factory is None or reader_factory is None or cloud_hz <= 0):
-            raise ValueError('Live mode needs a camera, a joint reader and a positive cloud rate')
-        if gear_factory is not None and not live:
-            raise ValueError('Gear detection needs live mode')
+        if live and (reader_factory is None or cloud_hz <= 0):
+            raise ValueError('Live mode needs a joint reader and a positive cloud rate')
+        if gear_factory is not None and (not live or camera_factory is None):
+            raise ValueError('Gear detection needs live mode with the camera')
+        if (hand_factory is not None or tactile_factory is not None) and not live:
+            raise ValueError('The live hand and tactile values need live mode')
         if pointcloud is not None:
             capture = load_pointcloud_capture(pointcloud, stride=cloud_stride)
             if expected and capture[2].get('serial') != expected:
@@ -214,9 +249,12 @@ class ResultViewer:
             # The extrinsic was solved with this mapping, so live motor angles must use it too.
             self.compensation = JointCompensation(tuple(c['directions']), tuple(c['offsets_deg']))
         self.live_q = None
+        self.arm_shown = None
+        self.hand_q = {}
         self.cloud = None
         self.lock = threading.RLock()
-        self.gear_factory = gear_factory
+        self.gear_factory, self.hand_factory, self.tactile_factory = gear_factory, hand_factory, tactile_factory
+        self.tactile_labels = tactile_labels
         self.latest_frame = None
         self.frame_ready = threading.Condition()
         self.gear_reset = threading.Event()
@@ -227,9 +265,12 @@ class ResultViewer:
         base = self.server.scene.add_frame('/robot', axes_length=.18, axes_radius=.0006, origin_radius=.0012)
         set_pose(base, transform(self.result['T_world_base']))
         urdf = Path(urdf or self.result['urdf'])
-        # The dexterous hand is not part of the calibrated chain and hides the board and the cloud.
-        self.model = without_links_below(yourdfpy.URDF.load(str(urdf), load_meshes=False),
-                                         self.result['tip_link'], urdf.parent)
+        if hand_factory is not None:
+            self.model = yourdfpy.URDF.load(str(urdf), load_meshes=True)
+        else:
+            # The dexterous hand is not part of the calibrated chain and hides the board and the cloud.
+            self.model = without_links_below(yourdfpy.URDF.load(str(urdf), load_meshes=False),
+                                             self.result['tip_link'], urdf.parent)
         if self.model.base_link != self.result['base_link']:
             # Robot mesh root relative to the calibrated base frame.
             root_in_base = self.model.get_transform(self.model.base_link, self.result['base_link'])
@@ -282,17 +323,26 @@ class ResultViewer:
                 gui.add_markdown('关节为只读查询，不使能电机；控制或采集程序占用 CAN 时读不到，会每 2 秒重试。\n\n'
                                  f'电机角按标定结果的补偿换算为模型角（{offsets or "零位偏置为 0"}）。')
                 self.joint_status = gui.add_markdown('关节：连接中…')
-                self.cloud_status = gui.add_markdown('点云：相机打开中…')
-                self.show_cloud = gui.add_checkbox('显示点云', initial_value=True)
-                @self.show_cloud.on_update
-                def _(event):
-                    with self.lock:
-                        if self.cloud is not None:
-                            self.cloud.visible = event.target.value
+                if hand_factory is not None:
+                    gui.add_markdown('灵巧手只读同步读取位置，不写任何寄存器（扭矩保持原状）；'
+                                     '不要和驱动灵巧手的程序同时运行。')
+                    self.hand_status = gui.add_markdown('灵巧手：连接中…')
+                if tactile_factory is not None:
+                    gui.add_markdown('触觉（PaXini L3530，只读）：135 个测点的法向原始值（0–255，未标定成牛顿）'
+                                     '求和、最大值和大于 5 的点数；总力寄存器为原始值，部署代码按 0.1 N 换算。')
+                    self.tactile_status = gui.add_markdown('触觉：连接中…')
                 show_robot = gui.add_checkbox('显示机器人模型', initial_value=True)
                 show_robot.on_update(lambda e: setattr(base, 'visible', e.target.value))
-                w, h = self.result['image_size']
-                self.live_image = gui.add_image(np.zeros((h, w, 3), dtype=np.uint8), label='实时 RGB')
+                if camera_factory is not None:
+                    self.cloud_status = gui.add_markdown('点云：相机打开中…')
+                    self.show_cloud = gui.add_checkbox('显示点云', initial_value=True)
+                    @self.show_cloud.on_update
+                    def _(event):
+                        with self.lock:
+                            if self.cloud is not None:
+                                self.cloud.visible = event.target.value
+                    w, h = self.result['image_size']
+                    self.live_image = gui.add_image(np.zeros((h, w, 3), dtype=np.uint8), label='实时 RGB')
         if gear_factory is not None:
             self.T_world_cam = transform(self.result['T_world_base']) @ transform(self.result['T_base_cam'])
             gear = trimesh.load(GEAR24_MESH, force='mesh')
@@ -361,10 +411,75 @@ class ResultViewer:
                 f"标定板世界位置：{poses['board'][:3, 3].round(4).tolist()} m")
 
     def set_robot(self, positions):
+        """Arm model angles (7,), plus the live hand angles when there are any."""
         q = dict(self.result.get('fixed_model_joints', {}))
         q.update(zip(self.result['joint_names'], positions))
         with self.lock:
+            q.update(self.hand_q)
+            self.arm_shown = positions
             self.visual.update_cfg(np.array([q.get(name, 0.) for name in self.model.actuated_joint_names]))
+
+    def show_hand(self, q):
+        """Show live hand angles (16,) in URDF radians, gx4m_joint1..16."""
+        q = np.asarray(q, float)
+        with self.lock:
+            self.hand_q = dict(zip(HAND_JOINTS, q))
+            self.set_robot(self.arm_shown)
+            self.hand_status.content = (f"灵巧手（URDF 角，{datetime.now():%H:%M:%S}）：" +
+                                        ' · '.join(f'{i} {v:+.1f}°' for i, v in enumerate(np.degrees(q), 1)))
+
+    def show_tactile(self, readings):
+        """readings: {label: (frame (135, 3) or None, total (3,) or None, error or None)}."""
+        rows = ['| 手指（序列号，端口） | 法向和 | 最大点 | >5 点数 | 总力 x / y / z（≈0.1 N） |', '|---|---|---|---|---|']
+        for label, (frame, total, error) in readings.items():
+            if error is not None:
+                rows.append(f'| {label} | 读取失败：{error} | | | |')
+                continue
+            normal = frame[:, 2]
+            rows.append(f'| {label} | {normal.sum():.0f} | {normal.max():.0f} | {int((normal > 5).sum())} | '
+                        f'{total[0]:+.0f} / {total[1]:+.0f} / {total[2]:.0f} |')
+        self.tactile_status.content = f'触觉（{datetime.now():%H:%M:%S}）\n\n' + '\n'.join(rows)
+
+    def _tactile_loop(self, stop):
+        while not stop.is_set():
+            sensors = {}
+            try:
+                sensors = self.tactile_factory()
+                rescan = time.monotonic() + RETRY_SEC
+                while not stop.wait(TACTILE_PERIOD_SEC):
+                    if self.tactile_labels is not None and time.monotonic() > rescan:
+                        rescan = time.monotonic() + RETRY_SEC
+                        try:
+                            if set(self.tactile_labels()) != set(sensors):
+                                break  # A sensor was plugged in or out: reopen them all.
+                        except Exception:
+                            pass
+                    readings = {}
+                    for label, sensor in sensors.items():
+                        try:
+                            readings[label] = (sensor.read_frame(), sensor.read_total(), None)
+                        except (RuntimeError, TimeoutError) as exc:  # This sensor only; the port is fine.
+                            readings[label] = (None, None, str(exc))
+                    self.show_tactile(readings)
+            except Exception as exc:
+                self.tactile_status.content = f'触觉读取失败：{exc}（{RETRY_SEC:g} 秒后重试）'
+                stop.wait(RETRY_SEC)
+            finally:
+                for sensor in sensors.values():
+                    try:
+                        sensor.close()
+                    except Exception:
+                        pass
+
+    def _hand_loop(self, stop):
+        while not stop.is_set():
+            try:
+                with self.hand_factory() as reader:
+                    while not stop.wait(HAND_PERIOD_SEC):
+                        self.show_hand(reader.read())
+            except Exception as exc:
+                self.hand_status.content = f'灵巧手读取失败：{exc}（{RETRY_SEC:g} 秒后重试；模型保持上次姿态）'
+                stop.wait(RETRY_SEC)
 
     def show_joints(self, motor_positions):
         """Show live raw motor angles, mapped with the calibration's compensation."""
@@ -467,8 +582,11 @@ class ResultViewer:
 
     def run(self):
         stop = threading.Event()
-        loops = (self._joint_loop, self._cloud_loop) if self.live else ()
+        loops = (self._joint_loop,) if self.live else ()
+        loops += (self._cloud_loop,) if self.live and self.camera_factory is not None else ()
         loops += (self._gear_loop,) if self.gear_factory is not None else ()
+        loops += (self._hand_loop,) if self.hand_factory is not None else ()
+        loops += (self._tactile_loop,) if self.tactile_factory is not None else ()
         threads = [threading.Thread(target=loop, args=(stop,), daemon=True) for loop in loops]
         for thread in threads:
             thread.start()
@@ -502,15 +620,24 @@ def main():
     parser.add_argument('--gear24', action='store_true',
                         help='With --live: track the red gear24 with FoundationPose (foundationpose env, one GPU)')
     parser.add_argument('--gear-gpu', default='0', help='Physical GPU index for FoundationPose')
+    parser.add_argument('--no-cloud', action='store_true', help='With --live: do not open the camera')
+    parser.add_argument('--hand-port', help='With --live: draw the hand and read its angles here, e.g. /dev/ttyUSB0')
+    parser.add_argument('--tactile', nargs='*', metavar='SERIAL',
+                        help='With --live: show PaXini values of these USB serial numbers (none given: all found)')
     args = parser.parse_args()
-    if args.gear24 and not args.live:
-        parser.error('--gear24 needs --live')
+    if (args.gear24 or args.no_cloud or args.hand_port or args.tactile is not None) and not args.live:
+        parser.error('--gear24, --no-cloud, --hand-port and --tactile need --live')
+    if args.gear24 and args.no_cloud:
+        parser.error('--gear24 needs the camera')
     command = ['bash', str(GEAR_WORKER), '--gear', 'gear24', '--gpu', args.gear_gpu]
     ResultViewer(args.result, host=args.host, port=args.port, urdf=args.urdf,
                  pointcloud=args.pointcloud, cloud_stride=args.cloud_stride, live=args.live,
-                 camera_factory=lambda: orbbec_stream(args.camera_device_index),
+                 camera_factory=None if args.no_cloud else lambda: orbbec_stream(args.camera_device_index),
                  reader_factory=lambda: joint_reader(args.robot_config), cloud_hz=args.cloud_hz,
-                 gear_factory=(lambda stop: GearWorker(command, cancel=stop)) if args.gear24 else None).run()
+                 gear_factory=(lambda stop: GearWorker(command, cancel=stop)) if args.gear24 else None,
+                 hand_factory=(lambda: HandFeedbackReader(args.hand_port)) if args.hand_port else None,
+                 tactile_factory=None if args.tactile is None else lambda: paxini_sensors(args.tactile or None),
+                 tactile_labels=lambda: paxini_labels(args.tactile or None)).run()
 
 
 if __name__ == '__main__':

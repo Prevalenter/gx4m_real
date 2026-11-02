@@ -189,6 +189,17 @@ bash apps/charuco_handeye/run.sh view --result <标定目录>/handeye_result.jso
 
 点云来自 Orbbec 去畸变 RGB-D 流，默认每秒更新 5 次（`--cloud-hz`），相机序列号须与标定相机一致。机器人姿态来自只读关节查询：每 0.1 秒向各电机发送状态查询，不使能电机、不切换控制模式，电机原始角度按标定结果里记录的关节补偿换算为模型角，所以与该外参一致，不读取 `apps/control/joint_compensation.yaml`。CAN 和相机都是独占的：控制程序或采集程序运行时读不到，页面显示错误并每 2 秒重试，模型保持上次姿态。`--robot-config` 指定 CAN 配置（默认 `apps/control/config.yaml`），`--camera-device-index` 选择相机。
 
+只看机械臂和灵巧手的实时关节、不打开相机时：
+
+```bash
+bash apps/charuco_handeye/run.sh view --result <标定目录>/handeye_result.json --live --no-cloud \
+  --hand-port /dev/ttyUSB0 --port 8088
+```
+
+`--hand-port` 显示灵巧手（不加时 Link7 以下不画），每 0.05 秒同步读取 16 个关节位置（`gx4m_real/robot/hand.py` 的 `HandFeedbackReader`），只读、不写任何寄存器，扭矩、模式和电流设置都保持原状。Linux 不锁串口，不要和驱动灵巧手的程序同时运行。读取前要把 FTDI 串口延迟设为 1 ms（`/sys/bus/usb-serial/devices/ttyUSB0/latency_timer`），并安装 `third_party/gex16`（`apps/control/setup.sh` 已包含）。
+
+加 `--tactile` 显示 PaXini L3530 指尖触觉数值（`gx4m_real/robot/tactile.py`，协议取自 tracker 项目里在用的驱动；`third_party/libgx7` 的 `TactileSerial` 是旧帧格式，这些传感器不应答）。不带参数时读取所有 PaXini 串口（USB `1a86:55d3`），也可以列出 USB 序列号只读其中几块。每 0.1 秒每块读一次 135 点阵列和总力寄存器，只读不写；面板按序列号列出法向原始值之和、最大点、大于 5 的点数和总力，单块读取失败只在它那一行显示原因。读数是未标定的原始相对值。
+
 实时模式加 `--gear24` 会同时用 FoundationPose 跟踪红色 24 齿齿轮：
 
 ```bash

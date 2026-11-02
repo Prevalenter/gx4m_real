@@ -31,6 +31,9 @@ class FakeSDK:
                 sdk.baud = baud
                 return True
 
+            def setPacketTimeoutMillis(self, ms):
+                sdk.read_timeout_ms = ms
+
             def closePort(self):
                 sdk.log.append(('close',))
 
@@ -59,7 +62,13 @@ class FakeSDK:
                 self.ids.append(motor)
                 return True
 
-            def txRxPacket(self):
+            def txPacket(self):
+                sdk.read_timeout_ms = None             # as the SDK, which sets its own short window here
+                return 0
+
+            def rxPacket(self):
+                if sdk.read_timeout_ms is None or sdk.read_timeout_ms < 20:
+                    return -3001                       # 16 real replies take about 12 ms
                 return -3001 if sdk.fail_read else 0
 
             def isAvailable(self, motor, address, size):
@@ -160,6 +169,16 @@ class HandDriverTests(unittest.TestCase):
         self.assertEqual(sdk.log[-1], ('close',))
         with self.assertRaises(RuntimeError):
             driver.read()
+
+    def test_feedback_reader_never_writes(self):
+        present = {i: 1000 + 7*i for i in range(1, 17)}
+        sdk = FakeSDK(present)
+        with H.HandFeedbackReader('test-only', sdk=sdk) as reader:
+            q = reader.read()
+        np.testing.assert_allclose(q, H.units_to_urdf([present[i] for i in range(1, 17)], reader.config['directions']))
+        self.assertEqual(sdk.log, [('close',)])           # no torque, mode or goal writes
+        with self.assertRaises(RuntimeError):
+            reader.read()
 
     def test_mock_moves_toward_the_command(self):
         with H.HandDriver(mock=True) as driver:

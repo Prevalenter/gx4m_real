@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -310,6 +311,61 @@ class CollectToSolveTests(CollectorCase):
             viewer.server.stop()
             worker.unlink()
             worker.parent.rmdir()
+        # Without a camera: no cloud widgets; with the hand reader, the hand is drawn at its live angles.
+        hand = np.linspace(0., .3, 16)
+        stop.clear()
+        class Tactile:
+            def __init__(self, normal):
+                self.normal, self.closed = normal, False
+
+            def read_frame(self):
+                stop.set()
+                if self.normal is None:
+                    raise RuntimeError('PaXini read failed with status 0x01')
+                frame = np.zeros((135, 3))
+                frame[:3, 2] = self.normal
+                return frame
+
+            def read_total(self):
+                return np.array([-1., 2., 9.])
+
+            def close(self):
+                self.closed = True
+
+        tactile = {'A': Tactile(10.), 'B': Tactile(None)}
+        viewer = ResultViewer(result_path, port=0, live=True, reader_factory=lambda: Source(np.array(motor)),
+                              hand_factory=lambda: Source(hand), tactile_factory=lambda: tactile)
+        try:
+            self.assertFalse(hasattr(viewer, 'cloud_status'))
+            self.assertIn('gx4m_link1', viewer.model.link_map)
+            viewer._hand_loop(stop)
+            self.assertEqual(viewer.hand_q['gx4m_joint16'], hand[15])
+            self.assertIn('16 +17.2°', viewer.hand_status.content)
+            stop.clear()
+            viewer._joint_loop(stop)                    # an arm update keeps the hand angles
+            self.assertEqual(viewer.hand_q['gx4m_joint1'], hand[0])
+            np.testing.assert_allclose(viewer.arm_shown, sample['positions_rad'])
+            stop.clear()
+            viewer._tactile_loop(stop)                  # one failing sensor does not hide the other
+            self.assertIn('| A | 30 | 10 | 3 | -1 / +2 / 9 |', viewer.tactile_status.content)
+            self.assertIn('| B | 读取失败：PaXini read failed with status 0x01', viewer.tactile_status.content)
+            self.assertTrue(all(s.closed for s in tactile.values()))
+            # A sensor plugged in later shows up: a changed label set reopens the sensors.
+            opened = []
+
+            def reopen():
+                opened.append(1)
+                if len(opened) == 2:
+                    stop.set()
+                return {'A': Tactile(1.)}
+
+            stop.clear()
+            viewer.tactile_factory, viewer.tactile_labels = reopen, lambda: ['A', 'C']
+            with patch('view_result.RETRY_SEC', 0.):
+                viewer._tactile_loop(stop)
+            self.assertEqual(len(opened), 2)
+        finally:
+            viewer.server.stop()
 
 
 class RejectionTests(CollectorCase):

@@ -111,7 +111,7 @@ class GearPoseTests(unittest.TestCase):
         offset = pose_matrix([0., 0., .01], [1., 0., 0., 0.])
         camera = CameraToEnv(HANDEYE, iface, offset)
         d = json.loads(HANDEYE.read_text(encoding='utf-8'))
-        T_env_cam = np.asarray(d['T_world_base']) @ np.asarray(d['T_base_cam'])
+        T_env_cam = pose_matrix(iface.ref['base_pos'], iface.ref['base_quat']) @ np.asarray(d['T_base_cam'])
         T_env_object = pose_matrix(iface.ref['object_pos'], iface.ref['object_quat'])
         T_cam_mesh = np.linalg.inv(T_env_cam) @ T_env_object @ np.linalg.inv(offset)
         np.testing.assert_allclose(camera(T_cam_mesh, np.zeros(23)), T_env_object, atol=2e-3)

@@ -10,13 +10,15 @@ Gear pose: tasks/dexlong_gear3/perception/publish_gear_pose.py (or step1_setup.p
 FoundationPose's gear24 object_in_camera per frame over UDP; it becomes env-frame through the hand-eye result
 (eye-to-hand: T_world_base @ T_base_cam; eye-in-hand: FK(Link7) @ T_flange_cam). The gear24 mesh is the
 simulation's gear body frame, so no mesh-to-gear transform is needed (--mesh-to-object only for another mesh).
-The world frame of the hand-eye result is the env frame of the reference (same robot base pose), checked at
-start. Place the plate with perception/step1_setup.py first.
+Only the calibrated camera (T_base_cam / T_flange_cam) is taken from the hand-eye result; the env frame comes from
+the reference robot base pose, not from the base pose recorded with the hand-eye session. Place the plate with
+perception/step1_setup.py first (it uses the same base pose, from config/initial_pose.json).
 
 Tactile: not wired yet (PaXini mapping and calibration pending), the policy sees no contact.
 
 Safety: every episode starts at the reference initial pose (moved there slowly, after a keypress), the arm
-speed is capped by the PVT velocity limit (default: the trained 1.5 rad/s), a stale gear pose or an arm that
+speed is capped by the PVT velocity limit (default: the trained PhysX limit, 1.5 rad/s; the policy targets move at
+most arm_moving_average * control.arm_speed_scale = 0.15 rad/s), a stale gear pose or an arm that
 falls behind its target stops the episode and holds the measured pose. Ctrl-C holds too. The arm stays
 powered until the operator confirms; disconnecting disables the motors (the arm can drop).
 
@@ -48,7 +50,7 @@ from gx4m_real.robot.hand import HandDriver                     # noqa: E402
 from gx4m_real.robot.kinematics import matrix_quat, quat_matrix  # noqa: E402
 from tasks.dexlong_gear3.step1 import Step1Interface            # noqa: E402
 
-MODEL = HERE/'models'/'step1_lstm_20261031_iter500.pt'
+MODEL = HERE/'models'/'step1_lstm_20261103_iter4750.pt'
 CONTROL_CONFIG = ROOT/'apps'/'control'/'config.yaml'
 START_RANGE = .02           # trained gear start: +-2 cm in x and y (reset_position_noise), any yaw
 
@@ -126,10 +128,13 @@ class CameraToEnv:
         d = json.loads(Path(handeye).read_text(encoding='utf-8'))
         if d.get('synthetic'):
             raise ValueError(f'{handeye} is a synthetic calibration')
+        # T_base_cam / T_flange_cam are the calibration; its T_world_base is only the robot base pose recorded
+        # with the session. The env frame is the reference's, whose base may have moved since.
         T_env_base = pose_matrix(iface.ref['base_pos'], iface.ref['base_quat'])
         gap = np.abs(np.asarray(d['T_world_base']) - T_env_base).max()
         if gap > 2e-3:
-            raise ValueError(f'Hand-eye base pose differs from the reference base pose by {gap:.4f}')
+            print(f'Hand-eye session recorded another robot base pose (up to {gap:.3f} off); '
+                  'using the reference base pose')
         self.mode = d['mode']
         if self.mode == 'eye-to-hand':
             self.T_env_cam = T_env_base @ np.asarray(d['T_base_cam'])

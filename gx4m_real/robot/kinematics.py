@@ -23,6 +23,20 @@ def axis_angle_matrix(axis, angle):
                      [z*x*C - y*s, z*y*C + x*s, c + z*z*C]])
 
 
+def quat_mul(a, b):
+    """Hamilton product of wxyz quaternions."""
+    aw, ax, ay, az = a
+    bw, bx, by, bz = b
+    return np.array([aw*bw - ax*bx - ay*by - az*bz, aw*bx + ax*bw + ay*bz - az*by,
+                     aw*by - ax*bz + ay*bw + az*bx, aw*bz + ax*by - ay*bx + az*bw])
+
+
+def rpy_quat(roll, pitch, yaw):
+    """URDF rpy (Rz(yaw) Ry(pitch) Rx(roll)) -> wxyz quaternion."""
+    half = lambda a, i: np.r_[np.cos(a/2), np.sin(a/2)*np.eye(3)[i]]
+    return quat_mul(quat_mul(half(yaw, 2), half(pitch, 1)), half(roll, 0))
+
+
 def quat_matrix(q):
     """wxyz quaternion -> 3x3 rotation."""
     w, x, y, z = np.asarray(q, dtype=np.float64) / np.linalg.norm(q)
@@ -55,6 +69,7 @@ class UrdfFK:
         self.root_link = ({l.get('name') for l in root.findall('link')} -
                           {j.find('child').get('link') for j in root.findall('joint')}).pop()
         self.joints = []                                    # parents before children
+        self.origin_quats = {}
         children = {}
         for j in root.findall('joint'):
             children.setdefault(j.find('parent').get('link'), []).append(j)
@@ -70,10 +85,12 @@ class UrdfFK:
                 axis = np.array([float(v) for v in ax.get('xyz').split()]) if ax is not None else np.array([1., 0., 0.])
                 self.joints.append((j.get('name'), j.get('type'), j.find('parent').get('link'),
                                     j.find('child').get('link'), T, axis))
+                self.origin_quats[j.get('name')] = rpy_quat(*rpy)
                 stack.append(j.find('child').get('link'))
         self.actuated = [n for n, t, *_ in self.joints if t in ('revolute', 'continuous', 'prismatic')]
         self.base = np.eye(4)
         self.base[:3, :3], self.base[:3, 3] = quat_matrix(base_quat), base_pos
+        self.base_quat = np.asarray(base_quat, dtype=np.float64)
 
     def link_poses(self, q: dict[str, float]) -> dict[str, np.ndarray]:
         """4x4 world pose of every link; q maps actuated joint names to radians (missing: 0)."""
@@ -90,3 +107,15 @@ class UrdfFK:
                 T = T @ M
             poses[child] = T
         return poses
+
+    def link_quats(self, q: dict[str, float]) -> dict[str, np.ndarray]:
+        """World wxyz quaternion of every link as the product along the joint chain, like PhysX and MuJoCo body
+        quaternions: its sign changes continuously with q (no w >= 0 flip), up to one global sign."""
+        quats = {self.root_link: self.base_quat}
+        for name, jtype, parent, child, _, axis in self.joints:
+            quat = quat_mul(quats[parent], self.origin_quats[name])
+            if jtype in ('revolute', 'continuous'):
+                angle = q.get(name, 0.)
+                quat = quat_mul(quat, np.r_[np.cos(angle/2), np.sin(angle/2)*axis/np.linalg.norm(axis)])
+            quats[child] = quat
+        return quats

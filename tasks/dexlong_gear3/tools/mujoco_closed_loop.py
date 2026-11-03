@@ -24,7 +24,7 @@ from step1 import Step1Interface, load_reference  # noqa: E402
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--learning', type=Path, required=True, help='gx4m_learning checkout')
-    parser.add_argument('--model', type=Path, default=HERE.parent/'models'/'step1_lstm_20261031_iter500.pt')
+    parser.add_argument('--model', type=Path, default=HERE.parent/'models'/'step1_lstm_20261103_iter4750.pt')
     parser.add_argument('--episodes', type=int, default=10)
     parser.add_argument('--substeps', type=int, default=40, help='MuJoCo substeps per 1/30 s step (1200 Hz)')
     parser.add_argument('--position-noise', type=float, default=.02, help='Gear start offset, uniform +-m in x, y')

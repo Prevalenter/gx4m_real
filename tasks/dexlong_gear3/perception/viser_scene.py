@@ -41,14 +41,21 @@ def initial_base(initial):
 
 
 def load_calibration(path, initial):
+    """Eye-to-hand result with T_world_base set to the task's robot base (initial_pose.json): T_base_cam is the
+    calibrated camera, the recorded T_world_base only the base pose of the session (kept as recorded_T_world_base),
+    so a calibration stays valid after the task moves the robot base in the world frame."""
     if path.suffix == '.npy':
         return {'T_base_cam': rigid(np.load(path)), 'T_world_base': initial_base(initial),
                 'base_link': 'base_link', 'synthetic': False}
     data = json.loads(path.read_text())
     if data.get('mode', 'eye-to-hand') != 'eye-to-hand':
         raise ValueError('This viewer expects a fixed-camera (eye-to-hand) calibration')
-    return {**data, 'T_base_cam': rigid(data['T_base_cam']),
-            'T_world_base': rigid(data.get('T_world_base', initial_base(initial))),
+    W = initial_base(initial)
+    recorded = rigid(data.get('T_world_base', W))
+    if np.abs(recorded - W).max() > 2e-3:
+        print(f'Calibration recorded another robot base pose (up to {np.abs(recorded - W).max():.3f} off); '
+              'using the task base from the initial pose', flush=True)
+    return {**data, 'T_base_cam': rigid(data['T_base_cam']), 'T_world_base': W, 'recorded_T_world_base': recorded,
             'base_link': data.get('base_link', 'base_link')}
 
 

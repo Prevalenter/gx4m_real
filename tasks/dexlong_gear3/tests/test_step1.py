@@ -1,7 +1,7 @@
 """Step1 interface and policy against a deterministic Isaac Lab rollout (no Isaac, no hardware).
 
 tests/data/step1_isaac_rollout.npz is gx4m_learning's export_gear3_split_sim2sim_reference.py --step 1 output
-for models/step1_lstm_20261031_iter500.pt (domain randomization off, nominal start, 400 steps, four
+for models/step1_lstm_20261103_iter4750.pt (domain randomization off, nominal start, 400 steps, three
 episodes): per step k the Isaac policy observation obs[k], its action[k], and the joint positions q[k],
 joint targets targets[k], gear pose and stage after that action, which the next observation obs[k+1] is
 built from. On a step with done[k] the recorded state is already the reset one.
@@ -20,7 +20,7 @@ from gx4m_real.robot.kinematics import quat_matrix  # noqa: E402
 from step1 import Step1Interface  # noqa: E402
 
 ROLLOUT = HERE/'data'/'step1_isaac_rollout.npz'
-MODEL = HERE.parent/'models'/'step1_lstm_20261031_iter500.pt'
+MODEL = HERE.parent/'models'/'step1_lstm_20261103_iter4750.pt'
 
 
 def slices(fields):
@@ -110,6 +110,19 @@ class Step1RolloutTests(unittest.TestCase):
             # ~1e-4 rad of arm target per step, far below the trained observation noise.
             err = max(err, float(np.abs(np.clip(actor(obs), -1, 1) - np.clip(self.rollout['action'][k], -1, 1)).max()))
         self.assertLess(err, 5e-3, f'max |action(rebuilt obs) - isaac action| = {err:.2e}')
+
+    def test_palm_rot_keeps_its_sign_across_w_zero(self):
+        """Isaac's palm quaternion changes continuously with the joints; joint3 sweeps its w through zero."""
+        q, previous = np.array(self.iface.ref['initial_joint_pos']), None
+        for angle in np.linspace(self.iface.lower[2], self.iface.upper[2], 81):
+            q[2] = angle
+            poses = self.iface.fk.link_poses(dict(zip(self.iface.joint_order, q)))
+            quat = self.iface.palm_and_tips(q)[1]
+            np.testing.assert_allclose(quat_matrix(quat), poses[self.iface.palm_body][:3, :3], atol=1e-9)
+            if previous is not None:
+                self.assertGreater(float(quat @ previous), .9)
+            previous = quat
+        self.assertLess(previous[0], 0.)
 
     def test_yaw_does_not_count_but_tilt_does(self):
         iface = self.iface

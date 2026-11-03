@@ -76,7 +76,23 @@ C:/mjfit/python.exe -m unittest tasks/dexlong_gear3/tests/test_step1.py -v
 C:/mjfit/python.exe tasks/dexlong_gear3/tools/mujoco_closed_loop.py --learning ../gx4m_learning --episodes 30
 ```
 
-当前模型 `step1_lstm_20261031_iter500.pt`（gx4m_learning `gx4m_dexlong_gear3_split_step1/2026-10-31_12-56-24/model_500.pt`，真机关节范围、手臂速度 1.5 rad/s、腕部力矩 6 N·m）：回放测试 7 项全部通过；MuJoCo 闭环（1200 Hz，齿轮起点 ±2 cm、偏航角任意）30 次全部成功。真机上 PVT 的速度上限要设成 1.5 rad/s（`apps/control/config.yaml` 默认 0.25 是示教用的保守值）。joint2 会用到 +14.5°，离真机上限 +15° 很近。
+`tasks/dexlong_gear3/config/initial_pose.json` 也要和训练侧 `experiment/dexlong_gear3_split/step1/initial_pose.json` 一致（基座位姿、初始关节）。
+
+当前模型是 `step1_lstm_20261103_iter4750.pt`，来自 gx4m_learning 的 `gx4m_dexlong_gear3_split_step1/2026-11-03_02-31-57/model_4750.pt`。训练条件：
+- 新基座和新初始关节；
+- 两个轴向关键点；
+- 真机关节范围；
+- 腕部力矩 6 N·m；
+- 回合 20 s。
+
+手臂目标速度最高 0.15 rad/s，算法是 `control.arm_speed_scale` 0.15 × `arm_moving_average` 1。手指仍用 `act_moving_average` 0.36 平滑。
+
+测试结果：
+- Isaac 确定性评估：成功率 86.7%（512 个回合）。
+- 回放测试：8 项全部通过。
+- MuJoCo 闭环（1200 Hz，齿轮起点 ±2 cm，偏航角任意）：30 次成功 29 次。
+
+`step1.py` 读取 `arm_moving_average`，手臂和手指分开平滑。旧版本两者都用 0.36，换上新模型后手臂只有 0.054 rad/s。
 
 ## step1 真机运行
 
@@ -90,7 +106,7 @@ C:/mjfit/python.exe tasks/dexlong_gear3/tools/mujoco_closed_loop.py --learning .
 - 固定相机：`T_world_base @ T_base_cam`
 - 腕部相机：`FK(Link7) @ T_flange_cam`
 
-启动时会检查手眼标定的基座位姿和参考配置是否一致。
+手眼标定结果只取相机外参 `T_base_cam` / `T_flange_cam`。`T_world_base` 一律用参考配置里的基座位姿：主循环用 `step1_reference.json`，感知工具用 `initial_pose.json`。标定文件里记录的基座位姿只是采集时的值，和参考配置不一致时会打印提示。这样训练侧换了基座，旧标定仍可使用，前提是相机和机械臂之间的相对位置没变。
 
 ```bash
 # 感知（另一个终端）：Viser 摆放检查，同时把位姿转发给主循环
@@ -115,7 +131,7 @@ python tasks/dexlong_gear3/run_step1.py --mock --yes --max-steps 60
 - 结束时保持当前姿态。程序退出前会再要求按一次回车才断开机械臂（断开会关电机，手臂可能下落，要先扶住）。
 
 安全设置：
-- PVT 速度上限默认用训练值 1.5 rad/s（`--arm-velocity`），不用 `apps/control/config.yaml` 里示教用的 0.25；力矩比例、`max_joint_step_rad` 和 CAN 参数仍读这个配置文件。
+- PVT 速度上限（`--arm-velocity`）默认 1.5 rad/s，就是训练时 PhysX 的关节速度上限，不用 `apps/control/config.yaml` 里示教用的 0.25。策略目标本身最多 0.15 rad/s。力矩比例、`max_joint_step_rad` 和 CAN 参数仍读这个配置文件。
 - `--arm-speed-scale` 可以降低策略每步的手臂速度，首次上机建议先降速。
 - 齿轮位姿超过 `--max-pose-age`（默认 0.3 s，训练覆盖到 0.13 s）没更新，或手臂目标与实测之差超过 `--max-tracking-error`（默认 0.3 rad），立即停止并保持姿态；Ctrl-C 也一样。
 
@@ -166,6 +182,6 @@ with HandDriver('COM5') as hand:           # connect()：保持当前姿态并�
 - [ ] **底板测量（实测）**：在实物上运行 `run_plate.sh`，和 gear24 套销钉的结果对比，确认精度够用。
 - [ ] **底板位置（实测）**：按 Viser 提示把底板摆到位。
 - [x] **30 Hz 主循环**：`tasks/dexlong_gear3/run_step1.py`（见上文“step1 真机运行”）。触觉暂时全为 0。
-- [ ] **安全**：首次上机用 `apply_action(..., arm_speed_scale=...)` 降速；监控目标与实测关节的差，超阈值停机；工作空间限制和急停；每个阶段 300 步（10 s）超时。策略动作大多饱和在 ±1，手指会满幅切换、手腕会抖，这是策略本身的行为。
-- [ ] **手臂驱动参数**：PVT 速度上限设成训练用的 1.5 rad/s，`max_joint_step_rad`（目标与实测之差上限，现在 0.08 rad）要对得上策略的步长；确认腕部 DM-J4310 是 V1.1（峰值 7 N·m）还是 V1.2（12.5 N·m），仿真按 6 N·m 训练；实测 PVT 下的阶跃响应，和仿真 PD（kp 200、kd 40）对比。
+- [ ] **安全**：首次上机用 `apply_action(..., arm_speed_scale=...)` 降速；监控目标与实测关节的差，超阈值停机；工作空间限制和急停；每个阶段 600 步（20 s）超时。策略动作大多饱和在 ±1，手指会满幅切换、手腕会抖，这是策略本身的行为。
+- [ ] **手臂驱动参数**：PVT 速度上限设成训练用的 1.5 rad/s。`max_joint_step_rad`（目标与实测之差上限，现在 0.08 rad）要和策略的步长对得上，策略每步最多 0.005 rad。确认腕部 DM-J4310 是 V1.1（峰值 7 N·m）还是 V1.2（12.5 N·m），仿真按 6 N·m 训练；实测 PVT 下的阶跃响应，和仿真 PD（kp 200、kd 40）对比。
 

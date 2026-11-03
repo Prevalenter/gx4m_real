@@ -23,7 +23,7 @@ from pathlib import Path
 
 import numpy as np
 
-from gx4m_real.robot.kinematics import UrdfFK, matrix_quat, quat_matrix
+from gx4m_real.robot.kinematics import UrdfFK, quat_matrix
 
 HERE = Path(__file__).resolve().parent
 REFERENCE = HERE/'config'/'step1_reference.json'
@@ -68,11 +68,17 @@ class Step1Interface:
         c = r['control']
         if c['kind'] != 'arm_increment_hand_absolute' or c['actions'] != len(self.joint_order):
             raise ValueError(f"Unsupported control {c['kind']!r} with {c['actions']} actions")
-        # control['smoothing'] is the 60 Hz constant (0.2); the 30 Hz env uses act_moving_average (0.36).
+        # control['smoothing'] is the 60 Hz constant (0.2); the 30 Hz env uses act_moving_average (0.36) for the
+        # fingers and arm_moving_average for the arm (older references have none: the arm uses the finger value).
         self.smoothing, self.arm_speed_scale, self.dt = r['act_moving_average'], c['arm_speed_scale'], r['step_dt']
+        self.arm_smoothing = r.get('arm_moving_average', self.smoothing)
         self.clip = r['clamp_abs_observations']
         self.p2p = r['p2p']
         self.teeth = None if r.get('yaw_free_goal') else r['goal_yaw_symmetry']
+        # Isaac's palm_rot is PhysX's link quaternion, continuous in q and with w ~ 0.2 at the start pose (it
+        # crosses w = 0 during the task, so a w >= 0 quaternion would flip the observation's sign there).
+        start = dict(zip(self.joint_order, r['initial_joint_pos']))
+        self.palm_sign = 1. if self.fk.link_quats(start)[self.palm_body][0] > 0 else -1.
         self.reward_offsets = np.array(r['reward_offsets'])
         self.grasp_position = np.array(r['grasp_position'])
         self.goals = [(np.array(r['preinsert_pos']), np.array(r['preinsert_quat'])),
@@ -91,12 +97,14 @@ class Step1Interface:
         return self.goals[min(self.stage, 1)]
 
     def palm_and_tips(self, q):
-        """Palm point (3,), palm link quaternion wxyz (4,) and fingertip pad points (4, 3) in the env frame."""
-        poses = self.fk.link_poses(dict(zip(self.joint_order, np.asarray(q, dtype=np.float64))))
+        """Palm point (3,), palm link quaternion wxyz (4,) with Isaac's sign and fingertip pad points (4, 3) in
+        the env frame."""
+        joints = dict(zip(self.joint_order, np.asarray(q, dtype=np.float64)))
+        poses = self.fk.link_poses(joints)
         P = poses[self.palm_body]
         palm = P[:3, 3] + P[:3, :3] @ self.palm_offset
         tips = np.stack([poses[b][:3, 3] + poses[b][:3, :3] @ o for b, o in zip(self.tip_bodies, self.tip_offsets)])
-        return palm, matrix_quat(P[:3, :3]), tips
+        return palm, self.palm_sign*self.fk.link_quats(joints)[self.palm_body], tips
 
     def observation(self, q, object_pos, object_axis, contact):
         """q: measured joint positions (23,) rad; object_pos: gear origin (3,); object_axis: gear +z axis (3,),
@@ -124,14 +132,16 @@ class Step1Interface:
 
     def apply_action(self, action, arm_speed_scale=None):
         """Policy action (23,) in [-1, 1] -> new joint targets (23,) rad, kept for prev_action_targets.
+        The arm's top target speed is arm_smoothing*arm_speed_scale rad/s (gx4m_learning joint_targets).
         arm_speed_scale overrides the trained rad/s per unit action (reference control.arm_speed_scale), e.g.
         slower for first hardware runs."""
         a = np.clip(np.asarray(action, dtype=np.float64), -1., 1.)
         speed = self.arm_speed_scale if arm_speed_scale is None else arm_speed_scale
         arm = np.clip(self.targets[:7] + speed*self.dt*a[:7], self.lower[:7], self.upper[:7])
         fingers = self.lower[7:] + .5*(a[7:] + 1)*(self.upper[7:] - self.lower[7:])
-        raw = np.concatenate((arm, fingers))
-        self.targets = np.clip(self.smoothing*raw + (1 - self.smoothing)*self.targets, self.lower, self.upper)
+        arm = self.arm_smoothing*arm + (1 - self.arm_smoothing)*self.targets[:7]
+        fingers = self.smoothing*fingers + (1 - self.smoothing)*self.targets[7:]
+        self.targets = np.clip(np.concatenate((arm, fingers)), self.lower, self.upper)
         return self.targets.copy()
 
     def keypoint_distance(self, object_pos, object_quat):

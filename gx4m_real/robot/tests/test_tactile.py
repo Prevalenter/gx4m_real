@@ -7,9 +7,9 @@ import numpy as np
 from gx4m_real.robot import tactile as T
 
 
-def reply(device_id, data, status=0, function=T.READ_FUNCTION):
+def reply(device_id, data, status=0, function=T.READ_FUNCTION, field=1):
     """A sensor reply: the length field counts the data bytes plus the 10 head bytes after it."""
-    head = b'\xaa\x55' + struct.pack('<HBBB', 10 + len(data), device_id, 0, function) + bytes(6)
+    head = b'\xaa\x55' + struct.pack('<HBBBIH', 10 + len(data), device_id, 0, function, 0, field)
     body = head + bytes([status]) + data
     return body + bytes([T.lrc(body)])
 
@@ -17,8 +17,8 @@ def reply(device_id, data, status=0, function=T.READ_FUNCTION):
 class FakeSerial:
     """Answers each read request from a register map; noise precedes every reply."""
 
-    def __init__(self, registers, status=0, **_):
-        self.registers, self.status = registers, status
+    def __init__(self, registers, status=0, echo_count=False, **_):
+        self.registers, self.status, self.echo_count = registers, status, echo_count
         self.written, self.pending, self.is_open = [], b'', True
 
     @property
@@ -32,8 +32,12 @@ class FakeSerial:
         self.written.append(request)
         device_id, _, function, address, count = struct.unpack('<BBBIH', request[4:13])
         assert request[:4] == b'\x55\xaa\x09\x00' and function == T.READ_FUNCTION and T.lrc(request[:-1]) == request[-1]
+        if not all(address + i in self.registers for i in range(count)):
+            self.pending += b'\x00\xaa' + reply(device_id, b'', self.status, field=0)
+            return
         data = bytes(self.registers[address + i] for i in range(count))
-        self.pending += b'\x00\xaa' + reply(device_id, data, self.status)
+        field = count if self.echo_count else 1
+        self.pending += b'\x00\xaa' + reply(device_id, data, self.status, field=field)
 
     def flush(self):
         pass
@@ -74,6 +78,14 @@ class PaXiniTests(unittest.TestCase):
         sensor, _ = self.make({T.TOTAL_ADDRESS + i: 0 for i in range(3)}, status=1)
         with self.assertRaisesRegex(RuntimeError, '0x01'):
             sensor.read_total()
+
+    def test_count_echoing_firmware(self):
+        """The 5C63... sensor echoes the byte count and sends 0x01 with valid data; an empty reply is still an error."""
+        sensor, _ = self.make({T.TOTAL_ADDRESS: 2, T.TOTAL_ADDRESS + 1: 0xFF, T.TOTAL_ADDRESS + 2: 1},
+                              status=1, echo_count=True)
+        np.testing.assert_array_equal(sensor.read_total(), [2, -1, 1])
+        with self.assertRaisesRegex(RuntimeError, '0x01'):
+            sensor.read(0x0000, 16)
 
 
 if __name__ == '__main__':

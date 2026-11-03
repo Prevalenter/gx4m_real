@@ -124,9 +124,11 @@ class PaXiniL3530:
             if len(frame) < HEAD_LEN + 2 or frame[4] != self.device_id or frame[6] != READ_FUNCTION:
                 continue
             payload = frame[HEAD_LEN:-1]
-            if payload[0] != 0:
+            # Two firmware revisions: the 5AA9... sensors reply with 01 00 at bytes 11-12 and status 0; the 5C63...
+            # one echoes the byte count there and always sends 0x01, also when the data is valid.
+            echoed = int.from_bytes(frame[11:13], 'little')
+            if payload[0] != 0 and not (echoed == byte_count and len(payload) == byte_count + 1):
                 raise RuntimeError(f'PaXini read failed with status 0x{payload[0]:02X}')
-            # The header length counts the data bytes only; the payload also starts with the status byte.
             data = payload[1:1 + byte_count]
             if len(data) != byte_count:
                 raise RuntimeError(f'Expected {byte_count} PaXini bytes, got {len(data)}')

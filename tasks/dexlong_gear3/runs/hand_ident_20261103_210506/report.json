@@ -1,0 +1,1362 @@
+{
+ "gx4m_joint1": {
+  "steps": [
+   {
+    "step_deg": 5.000000000000001,
+    "real": {
+     "t10_ms": 40.9224450122565,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.6417003260949876
+    },
+    "sim": {
+     "t10_ms": null,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.0
+    },
+    "max_current_ma": 46.0
+   },
+   {
+    "step_deg": -5.000000000000001,
+    "real": {
+     "t10_ms": 41.00259696133435,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -1.0086546739050188
+    },
+    "sim": {
+     "t10_ms": 13.0000039935112,
+     "rise_ms": 57.00261006131768,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -0.025052301678821214
+    },
+    "max_current_ma": 50.0
+   },
+   {
+    "step_deg": 14.999999999999996,
+    "real": {
+     "t10_ms": 40.0125861633569,
+     "rise_ms": 93.94790884107351,
+     "overshoot_pct": 13.585776089699863,
+     "steady_error_deg": -0.8720206739050229
+    },
+    "sim": {
+     "t10_ms": 12.963254004716873,
+     "rise_ms": 54.06360304914415,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.016689026647058982
+    },
+    "max_current_ma": 92.0
+   },
+   {
+    "step_deg": -14.999999999999998,
+    "real": {
+     "t10_ms": 40.98034999333322,
+     "rise_ms": 96.03579016402364,
+     "overshoot_pct": 7.1514509389977166,
+     "steady_error_deg": 0.2413933260949755
+    },
+    "sim": {
+     "t10_ms": 12.97443499788642,
+     "rise_ms": 55.014488054439425,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -0.016139831033805823
+    },
+    "max_current_ma": 89.0
+   }
+  ],
+  "ramps": [
+   {
+    "speed": 0.5,
+    "lag_deg": 2.203312463784293,
+    "sim_lag_deg": 1.058325475095031
+   },
+   {
+    "speed": 1.0,
+    "lag_deg": 3.9646723295788076,
+    "sim_lag_deg": 1.8746910909001056
+   },
+   {
+    "speed": 2.0,
+    "lag_deg": 6.353782728711442,
+    "sim_lag_deg": 3.4263797400785245
+   }
+  ],
+  "chirp": {
+   "delay_ms": 72.0,
+   "sim_delay_ms": 36.0,
+   "amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.8174891244175648,
+    "1-2 Hz": 0.8262493210805029,
+    "2-3 Hz": 0.8261763674103122,
+    "3-4 Hz": 0.7657135799952421
+   },
+   "sim_amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.9897560487187642,
+    "1-2 Hz": 0.9755347629145579,
+    "2-3 Hz": 0.9358866421418538,
+    "3-4 Hz": 0.8910719149676446
+   }
+  },
+  "read_period_ms": 13.017482007853687
+ },
+ "gx4m_joint2": {
+  "steps": [
+   {
+    "step_deg": 4.999999999999995,
+    "real": {
+     "t10_ms": 25.940591003745794,
+     "rise_ms": 97.95377007685602,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.2617944366664346
+    },
+    "sim": {
+     "t10_ms": null,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.0
+    },
+    "max_current_ma": 54.0
+   },
+   {
+    "step_deg": -4.999999999999995,
+    "real": {
+     "t10_ms": 39.98619713820517,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -1.652233563333547
+    },
+    "sim": {
+     "t10_ms": 12.983690947294235,
+     "rise_ms": 55.02520501613617,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -0.02115374809910946
+    },
+    "max_current_ma": 73.0
+   },
+   {
+    "step_deg": 14.999999999999996,
+    "real": {
+     "t10_ms": 40.02393898554146,
+     "rise_ms": 94.97184795327485,
+     "overshoot_pct": 16.736646454124138,
+     "steady_error_deg": -0.6366895633335582
+    },
+    "sim": {
+     "t10_ms": 12.983961962163448,
+     "rise_ms": 55.048479000106454,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.017239572089121753
+    },
+    "max_current_ma": 90.0
+   },
+   {
+    "step_deg": -14.999999999999996,
+    "real": {
+     "t10_ms": 52.988013019785285,
+     "rise_ms": 110.00027297995985,
+     "overshoot_pct": 1.9726473584271265,
+     "steady_error_deg": -0.6658585633335402
+    },
+    "sim": {
+     "t10_ms": 12.989822076633573,
+     "rise_ms": 54.013787070289254,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -0.04217461040995081
+    },
+    "max_current_ma": 92.0
+   }
+  ],
+  "ramps": [
+   {
+    "speed": 0.5,
+    "lag_deg": 1.7816644759572409,
+    "sim_lag_deg": 1.0579990742403473
+   },
+   {
+    "speed": 1.0,
+    "lag_deg": 3.150327795528819,
+    "sim_lag_deg": 1.9204671247990786
+   },
+   {
+    "speed": 2.0,
+    "lag_deg": 5.666675488130171,
+    "sim_lag_deg": 3.4638297537805642
+   }
+  ],
+  "chirp": {
+   "delay_ms": 67.0,
+   "sim_delay_ms": 36.0,
+   "amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.7647478905841724,
+    "1-2 Hz": 0.843829093869449,
+    "2-3 Hz": 0.8437545879935092,
+    "3-4 Hz": 0.7657135799952405
+   },
+   "sim_amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.9903508068224325,
+    "1-2 Hz": 0.9738234748719751,
+    "2-3 Hz": 0.9323134725893198,
+    "3-4 Hz": 0.8954351115446985
+   }
+  },
+  "read_period_ms": 13.007435947656631
+ },
+ "gx4m_joint3": {
+  "steps": [
+   {
+    "step_deg": 5.000000000000001,
+    "real": {
+     "t10_ms": 25.99839586764574,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.9104782921891188
+    },
+    "sim": {
+     "t10_ms": null,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.0
+    },
+    "max_current_ma": 55.0
+   },
+   {
+    "step_deg": -5.0,
+    "real": {
+     "t10_ms": 40.99320387467742,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -1.003549707810885
+    },
+    "sim": {
+     "t10_ms": 12.99802795983851,
+     "rise_ms": 55.993491085246205,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -1.5902773407317584e-15
+    },
+    "max_current_ma": 67.0
+   },
+   {
+    "step_deg": 14.999999999999998,
+    "real": {
+     "t10_ms": 39.94927112944424,
+     "rise_ms": 106.99396580457687,
+     "overshoot_pct": 9.972024350839037,
+     "steady_error_deg": -0.5153517078108811
+    },
+    "sim": {
+     "t10_ms": 12.960698921233416,
+     "rise_ms": 53.9859551936388,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 6.3611093629270335e-15
+    },
+    "max_current_ma": 87.0
+   }
+  ],
+  "ramps": [
+   {
+    "speed": 0.5,
+    "lag_deg": 1.7362787191514655,
+    "sim_lag_deg": 1.0545389129145706
+   },
+   {
+    "speed": 1.0,
+    "lag_deg": 3.0392325119083208,
+    "sim_lag_deg": 1.9061692925868792
+   },
+   {
+    "speed": 2.0,
+    "lag_deg": 5.56949746435203,
+    "sim_lag_deg": 3.587560138442177
+   }
+  ],
+  "chirp": {
+   "delay_ms": 60.0,
+   "sim_delay_ms": 35.0,
+   "amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.799908713139768,
+    "1-2 Hz": 0.8438290938694495,
+    "2-3 Hz": 0.8701219188683071,
+    "3-4 Hz": 0.8097201075811753
+   },
+   "sim_amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.9923716574745322,
+    "1-2 Hz": 0.9748198990641651,
+    "2-3 Hz": 0.9424889569624275,
+    "3-4 Hz": 0.894776735362958
+   }
+  },
+  "read_period_ms": 13.00830696709454
+ },
+ "gx4m_joint4": {
+  "steps": [
+   {
+    "step_deg": 5.000000000000001,
+    "real": {
+     "t10_ms": 40.88285216130316,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.9370557090929199
+    },
+    "sim": {
+     "t10_ms": null,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.0
+    },
+    "max_current_ma": 37.0
+   },
+   {
+    "step_deg": -5.0,
+    "real": {
+     "t10_ms": 28.964814031496644,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -0.7132992909070713
+    },
+    "sim": {
+     "t10_ms": 12.973804026842117,
+     "rise_ms": 57.03066382557154,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -0.0063624425532296195
+    },
+    "max_current_ma": 51.0
+   },
+   {
+    "step_deg": 14.999999999999998,
+    "real": {
+     "t10_ms": 41.0342370159924,
+     "rise_ms": 96.96367708966136,
+     "overshoot_pct": 10.840869702133716,
+     "steady_error_deg": -0.7524472909070689
+    },
+    "sim": {
+     "t10_ms": 13.114125933498144,
+     "rise_ms": 55.90429110452533,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.0381780317254677
+    },
+    "max_current_ma": 83.0
+   }
+  ],
+  "ramps": [
+   {
+    "speed": 0.5,
+    "lag_deg": 2.1709878888968586,
+    "sim_lag_deg": 1.075403791405841
+   },
+   {
+    "speed": 1.0,
+    "lag_deg": 3.660844111709388,
+    "sim_lag_deg": 1.7319871167892749
+   },
+   {
+    "speed": 2.0,
+    "lag_deg": 6.106130488130178,
+    "sim_lag_deg": 3.0220237590640444
+   }
+  ],
+  "chirp": {
+   "delay_ms": 72.0,
+   "sim_delay_ms": 35.0,
+   "amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.808698918778668,
+    "1-2 Hz": 0.8174594346860311,
+    "2-3 Hz": 0.7998090365355153,
+    "3-4 Hz": 0.7129057468921214
+   },
+   "sim_amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.9899796017820494,
+    "1-2 Hz": 0.9734779409844175,
+    "2-3 Hz": 0.9294037952391009,
+    "3-4 Hz": 0.8893348234415996
+   }
+  },
+  "read_period_ms": 13.022100552916527
+ },
+ "gx4m_joint5": {
+  "steps": [
+   {
+    "step_deg": 5.0,
+    "real": {
+     "t10_ms": 40.018404833972454,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 1.2203030000000015
+    },
+    "sim": {
+     "t10_ms": null,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.0
+    },
+    "max_current_ma": 43.0
+   },
+   {
+    "step_deg": -5.0,
+    "real": {
+     "t10_ms": 40.99440295249224,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -4.033582999999995
+    },
+    "sim": {
+     "t10_ms": 12.987870024517179,
+     "rise_ms": 56.003924924880266,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -1.5902773407317584e-15
+    },
+    "max_current_ma": 81.0
+   }
+  ],
+  "ramps": [],
+  "chirp": {
+   "delay_ms": 65.0,
+   "sim_delay_ms": 35.0,
+   "amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.43951028194492847,
+    "1-2 Hz": 0.5361830700628797,
+    "2-3 Hz": 0.5449248380791422,
+    "3-4 Hz": 0.5104757199968283
+   },
+   "sim_amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.98901522868679,
+    "1-2 Hz": 0.9754060617956674,
+    "2-3 Hz": 0.9328776051526045,
+    "3-4 Hz": 0.8691098332626725
+   }
+  },
+  "read_period_ms": 13.028928427956998
+ },
+ "gx4m_joint6": {
+  "steps": [
+   {
+    "step_deg": 5.000000000000001,
+    "real": {
+     "t10_ms": 26.00609720684588,
+     "rise_ms": 42.99721494317055,
+     "overshoot_pct": 53.27639396398993,
+     "steady_error_deg": -0.9470341651739466
+    },
+    "sim": {
+     "t10_ms": null,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.0
+    },
+    "max_current_ma": 75.0
+   },
+   {
+    "step_deg": -5.000000000000001,
+    "real": {
+     "t10_ms": 53.96242905408144,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -4.03161048335577
+    },
+    "sim": {
+     "t10_ms": 12.968705035746098,
+     "rise_ms": 56.023270124569535,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -0.01017801212493918
+    },
+    "max_current_ma": 103.0
+   },
+   {
+    "step_deg": 14.999999999999996,
+    "real": {
+     "t10_ms": 40.960435988381505,
+     "rise_ms": 69.00504697114229,
+     "overshoot_pct": 24.68181294496743,
+     "steady_error_deg": -2.284973165173945
+    },
+    "sim": {
+     "t10_ms": 12.943683890625834,
+     "rise_ms": 56.11189315095544,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 1.2722218725854067e-14
+    },
+    "max_current_ma": 96.0
+   },
+   {
+    "step_deg": -14.999999999999998,
+    "real": {
+     "t10_ms": 69.00111096911132,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -2.75359716517394
+    },
+    "sim": {
+     "t10_ms": 12.998574879020452,
+     "rise_ms": 56.00253609009087,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -0.028507400981358715
+    },
+    "max_current_ma": 103.0
+   }
+  ],
+  "ramps": [
+   {
+    "speed": 0.5,
+    "lag_deg": 1.6562906707243128,
+    "sim_lag_deg": 1.0350855582030059
+   },
+   {
+    "speed": 1.0,
+    "lag_deg": 2.9597428716480083,
+    "sim_lag_deg": 1.88334796508898
+   },
+   {
+    "speed": 2.0,
+    "lag_deg": 6.264224104612355,
+    "sim_lag_deg": 3.3845902054345496
+   }
+  ],
+  "chirp": {
+   "delay_ms": 76.0,
+   "sim_delay_ms": 36.0,
+   "amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.6592654229173913,
+    "1-2 Hz": 0.6856111387689281,
+    "2-3 Hz": 0.6767614924531286,
+    "3-4 Hz": 0.5456809420655744
+   },
+   "sim_amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.9895787019317673,
+    "1-2 Hz": 0.9754934466261164,
+    "2-3 Hz": 0.9263361399312504,
+    "3-4 Hz": 0.8749230925198602
+   }
+  },
+  "read_period_ms": 13.020742451772094
+ },
+ "gx4m_joint7": {
+  "steps": [
+   {
+    "step_deg": 5.000000000000001,
+    "real": {
+     "t10_ms": 26.010770117864013,
+     "rise_ms": 80.96577692776918,
+     "overshoot_pct": 3.065473789420281,
+     "steady_error_deg": -0.11763629090707008
+    },
+    "sim": {
+     "t10_ms": null,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.0
+    },
+    "max_current_ma": 59.0
+   },
+   {
+    "step_deg": -5.0,
+    "real": {
+     "t10_ms": 41.004923870787024,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -1.5210594337642196
+    },
+    "sim": {
+     "t10_ms": 13.000960927456617,
+     "rise_ms": 55.997056886553764,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -1.5902773407317584e-15
+    },
+    "max_current_ma": 72.0
+   },
+   {
+    "step_deg": 14.999999999999998,
+    "real": {
+     "t10_ms": 41.00970504805446,
+     "rise_ms": 68.98701912723482,
+     "overshoot_pct": 17.446494745186026,
+     "steady_error_deg": -1.191902290907078
+    },
+    "sim": {
+     "t10_ms": 13.003961183130741,
+     "rise_ms": 55.99975795485079,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.02602745312818345
+    },
+    "max_current_ma": 96.0
+   }
+  ],
+  "ramps": [
+   {
+    "speed": 0.5,
+    "lag_deg": 1.557145366097636,
+    "sim_lag_deg": 1.0832088932710926
+   },
+   {
+    "speed": 1.0,
+    "lag_deg": 3.050148305232925,
+    "sim_lag_deg": 1.9322198094278318
+   },
+   {
+    "speed": 2.0,
+    "lag_deg": 5.51463617102744,
+    "sim_lag_deg": 3.5810158554621387
+   }
+  ],
+  "chirp": {
+   "delay_ms": 59.0,
+   "sim_delay_ms": 35.0,
+   "amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.8262793300564633,
+    "1-2 Hz": 0.8789886394473431,
+    "2-3 Hz": 0.878911029159906,
+    "3-4 Hz": 0.7921174965468021
+   },
+   "sim_amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.9911993124373112,
+    "1-2 Hz": 0.975052401955585,
+    "2-3 Hz": 0.9351588934663574,
+    "3-4 Hz": 0.9001633031935387
+   }
+  },
+  "read_period_ms": 13.011444825679064
+ },
+ "gx4m_joint8": {
+  "steps": [
+   {
+    "step_deg": 5.000000000000001,
+    "real": {
+     "t10_ms": 25.984299834817648,
+     "rise_ms": 420.96823803149164,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.4097097090929243
+    },
+    "sim": {
+     "t10_ms": null,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.0
+    },
+    "max_current_ma": 49.0
+   },
+   {
+    "step_deg": -5.0,
+    "real": {
+     "t10_ms": 26.00388089194894,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -0.9769722909070825
+    },
+    "sim": {
+     "t10_ms": 12.993785087019205,
+     "rise_ms": 54.02210587635636,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -1.5902773407317584e-15
+    },
+    "max_current_ma": 70.0
+   },
+   {
+    "step_deg": 14.999999999999998,
+    "real": {
+     "t10_ms": 39.987835101783276,
+     "rise_ms": 80.0035500433296,
+     "overshoot_pct": 12.786945990551079,
+     "steady_error_deg": -0.8403382909070828
+    },
+    "sim": {
+     "t10_ms": 13.00390693359077,
+     "rise_ms": 53.99655713699758,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.03892968539477781
+    },
+    "max_current_ma": 94.0
+   }
+  ],
+  "ramps": [
+   {
+    "speed": 0.5,
+    "lag_deg": 1.685442000303123,
+    "sim_lag_deg": 1.1044958548974382
+   },
+   {
+    "speed": 1.0,
+    "lag_deg": 3.086763657307838,
+    "sim_lag_deg": 1.9003299519392882
+   },
+   {
+    "speed": 2.0,
+    "lag_deg": 5.982375047448222,
+    "sim_lag_deg": 3.4177248757917713
+   }
+  ],
+  "chirp": {
+   "delay_ms": 59.0,
+   "sim_delay_ms": 36.0,
+   "amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.8438597413342601,
+    "1-2 Hz": 0.8789886394473447,
+    "2-3 Hz": 0.8701219188683084,
+    "3-4 Hz": 0.8097201075811753
+   },
+   "sim_amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.991463271984443,
+    "1-2 Hz": 0.9778577400214916,
+    "2-3 Hz": 0.9210968071550556,
+    "3-4 Hz": 0.8767581337014813
+   }
+  },
+  "read_period_ms": 13.008286012336612
+ },
+ "gx4m_joint9": {
+  "steps": [
+   {
+    "step_deg": 5.0,
+    "real": {
+     "t10_ms": 41.980681009590626,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 3.06601400000001
+    },
+    "sim": {
+     "t10_ms": null,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.0
+    },
+    "max_current_ma": 50.0
+   },
+   {
+    "step_deg": -5.0,
+    "real": {
+     "t10_ms": 40.97442585043609,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -1.9241990000000013
+    },
+    "sim": {
+     "t10_ms": 13.020400889217854,
+     "rise_ms": 56.95820692926645,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -0.001315682613671377
+    },
+    "max_current_ma": 48.0
+   }
+  ],
+  "ramps": [],
+  "chirp": {
+   "delay_ms": 69.0,
+   "sim_delay_ms": 35.0,
+   "amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.45709069322272394,
+    "1-2 Hz": 0.5273931836684064,
+    "2-3 Hz": 0.5625030586623401,
+    "3-4 Hz": 0.5544822475827612
+   },
+   "sim_amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.9919109300210842,
+    "1-2 Hz": 0.9736436761994511,
+    "2-3 Hz": 0.9213105797117945,
+    "3-4 Hz": 0.8706596805600783
+   }
+  },
+  "read_period_ms": 13.006691820919514
+ },
+ "gx4m_joint10": {
+  "steps": [
+   {
+    "step_deg": 5.000000000000001,
+    "real": {
+     "t10_ms": 25.91787581332028,
+     "rise_ms": 85.00783913768828,
+     "overshoot_pct": 26.03436176545666,
+     "steady_error_deg": -0.5083471651739431
+    },
+    "sim": {
+     "t10_ms": null,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.0
+    },
+    "max_current_ma": 53.0
+   },
+   {
+    "step_deg": -5.000000000000001,
+    "real": {
+     "t10_ms": 53.9865680038929,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -4.531759165173934
+    },
+    "sim": {
+     "t10_ms": 12.991683091968298,
+     "rise_ms": 55.99796283058822,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -6.3611093629270335e-15
+    },
+    "max_current_ma": 89.0
+   },
+   {
+    "step_deg": 14.999999999999996,
+    "real": {
+     "t10_ms": 40.00533907674253,
+     "rise_ms": 81.04573702439666,
+     "overshoot_pct": 20.759687171587295,
+     "steady_error_deg": -2.2857411651739477
+    },
+    "sim": {
+     "t10_ms": 13.002563966438174,
+     "rise_ms": 54.001810029149055,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.01441832869639827
+    },
+    "max_current_ma": 99.0
+   },
+   {
+    "step_deg": -14.999999999999998,
+    "real": {
+     "t10_ms": 79.99057113192976,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -4.336403165173945
+    },
+    "sim": {
+     "t10_ms": 12.991843977943063,
+     "rise_ms": 53.99917205795646,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -0.00712826114340094
+    },
+    "max_current_ma": 106.0
+   }
+  ],
+  "ramps": [
+   {
+    "speed": 0.5,
+    "lag_deg": 1.9862382009236963,
+    "sim_lag_deg": 1.0911969447767598
+   },
+   {
+    "speed": 1.0,
+    "lag_deg": 3.9055730545452723,
+    "sim_lag_deg": 1.9224439642232438
+   },
+   {
+    "speed": 2.0,
+    "lag_deg": 6.305655171027429,
+    "sim_lag_deg": 3.420681569452988
+   }
+  ],
+  "chirp": {
+   "delay_ms": 90.0,
+   "sim_delay_ms": 35.0,
+   "amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.5801535721673052,
+    "1-2 Hz": 0.571342615640775,
+    "2-3 Hz": 0.4834010660379477,
+    "3-4 Hz": 0.3520522206874678
+   },
+   "sim_amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.9891675629278225,
+    "1-2 Hz": 0.9782696426047375,
+    "2-3 Hz": 0.9305849279069663,
+    "3-4 Hz": 0.8875052929809063
+   }
+  },
+  "read_period_ms": 13.011296978220344
+ },
+ "gx4m_joint11": {
+  "steps": [
+   {
+    "step_deg": 5.000000000000001,
+    "real": {
+     "t10_ms": 26.015367126092315,
+     "rise_ms": 84.92429181933403,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.058913709092922
+    },
+    "sim": {
+     "t10_ms": null,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.0
+    },
+    "max_current_ma": 34.0
+   },
+   {
+    "step_deg": -5.0,
+    "real": {
+     "t10_ms": 40.994040900841355,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -0.9762042909070889
+    },
+    "sim": {
+     "t10_ms": 12.983077904209495,
+     "rise_ms": 57.01158195734024,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -1.5902773407317584e-15
+    },
+    "max_current_ma": 59.0
+   },
+   {
+    "step_deg": 14.999999999999998,
+    "real": {
+     "t10_ms": 40.98604200407863,
+     "rise_ms": 82.02159497886896,
+     "overshoot_pct": 17.33811683977633,
+     "steady_error_deg": -0.751679290907076
+    },
+    "sim": {
+     "t10_ms": 13.0495501216501,
+     "rise_ms": 55.931925773620605,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 6.3611093629270335e-15
+    },
+    "max_current_ma": 83.0
+   }
+  ],
+  "ramps": [
+   {
+    "speed": 0.5,
+    "lag_deg": 1.841021183200384,
+    "sim_lag_deg": 1.0608371021232919
+   },
+   {
+    "speed": 1.0,
+    "lag_deg": 3.6368510124760616,
+    "sim_lag_deg": 1.9302396349870583
+   },
+   {
+    "speed": 2.0,
+    "lag_deg": 5.77099611170938,
+    "sim_lag_deg": 3.6014375920463966
+   }
+  ],
+  "chirp": {
+   "delay_ms": 69.0,
+   "sim_delay_ms": 36.0,
+   "amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.8614401526120571,
+    "1-2 Hz": 0.8877785258418165,
+    "2-3 Hz": 0.834965477701911,
+    "3-4 Hz": 0.7569122744780556
+   },
+   "sim_amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.9915770476117653,
+    "1-2 Hz": 0.9731671636298278,
+    "2-3 Hz": 0.9302599894017539,
+    "3-4 Hz": 0.8786505667768265
+   }
+  },
+  "read_period_ms": 13.03028897382319
+ },
+ "gx4m_joint12": {
+  "steps": [
+   {
+    "step_deg": 5.000000000000001,
+    "real": {
+     "t10_ms": 25.948334950953722,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.49836870909291836
+    },
+    "sim": {
+     "t10_ms": null,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.0
+    },
+    "max_current_ma": 54.0
+   },
+   {
+    "step_deg": -5.0,
+    "real": {
+     "t10_ms": 26.014334987848997,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -0.7325065181798046
+    },
+    "sim": {
+     "t10_ms": 13.01032304763794,
+     "rise_ms": 55.991413071751595,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -0.017655649648502567
+    },
+    "max_current_ma": 67.0
+   },
+   {
+    "step_deg": 14.999999999999998,
+    "real": {
+     "t10_ms": 41.02245601825416,
+     "rise_ms": 82.09135197103024,
+     "overshoot_pct": 13.424181296229222,
+     "steady_error_deg": -0.663788290907078
+    },
+    "sim": {
+     "t10_ms": 13.000313192605972,
+     "rise_ms": 56.01139483042061,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 6.3611093629270335e-15
+    },
+    "max_current_ma": 93.0
+   }
+  ],
+  "ramps": [
+   {
+    "speed": 0.5,
+    "lag_deg": 1.5654768417517575,
+    "sim_lag_deg": 1.071294203873877
+   },
+   {
+    "speed": 1.0,
+    "lag_deg": 2.9576990231023568,
+    "sim_lag_deg": 1.8777518350067763
+   },
+   {
+    "speed": 2.0,
+    "lag_deg": 5.318884681653725,
+    "sim_lag_deg": 3.070389695764679
+   }
+  ],
+  "chirp": {
+   "delay_ms": 57.0,
+   "sim_delay_ms": 35.0,
+   "amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.85264994697316,
+    "1-2 Hz": 0.896568412236291,
+    "2-3 Hz": 0.9140674703263034,
+    "3-4 Hz": 0.8273227186155486
+   },
+   "sim_amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.989620181208992,
+    "1-2 Hz": 0.9720073757599117,
+    "2-3 Hz": 0.9270897641176692,
+    "3-4 Hz": 0.8898939630632114
+   }
+  },
+  "read_period_ms": 13.009424670599401
+ },
+ "gx4m_joint13": {
+  "steps": [
+   {
+    "step_deg": 5.000000000000001,
+    "real": {
+     "t10_ms": 25.94698197208345,
+     "rise_ms": 45.003409031778574,
+     "overshoot_pct": 5.997736136004828,
+     "steady_error_deg": -0.11763629090707008
+    },
+    "sim": {
+     "t10_ms": null,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.0
+    },
+    "max_current_ma": 165.0
+   },
+   {
+    "step_deg": -5.0,
+    "real": {
+     "t10_ms": 25.997143937274814,
+     "rise_ms": 54.97881188057363,
+     "overshoot_pct": 3.2422786903234746,
+     "steady_error_deg": -0.17066789960272916
+    },
+    "sim": {
+     "t10_ms": 12.985606910660863,
+     "rise_ms": 55.01369200646877,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -1.5902773407317584e-15
+    },
+    "max_current_ma": 175.0
+   },
+   {
+    "step_deg": 14.999999999999998,
+    "real": {
+     "t10_ms": 42.05339797772467,
+     "rise_ms": 121.95054604671896,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.1264627090929207
+    },
+    "sim": {
+     "t10_ms": 13.015548000112176,
+     "rise_ms": 57.01437103562057,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 6.3611093629270335e-15
+    },
+    "max_current_ma": 163.0
+   }
+  ],
+  "ramps": [
+   {
+    "speed": 0.5,
+    "lag_deg": 1.1901701588544975,
+    "sim_lag_deg": 1.0847137852288444
+   },
+   {
+    "speed": 1.0,
+    "lag_deg": 2.1747781710274356,
+    "sim_lag_deg": 1.9186811831312964
+   },
+   {
+    "speed": 2.0,
+    "lag_deg": 4.236676805232923,
+    "sim_lag_deg": 3.56047068043603
+   }
+  ],
+  "chirp": {
+   "delay_ms": 40.0,
+   "sim_delay_ms": 35.0,
+   "amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.9757128259177386,
+    "1-2 Hz": 0.9756773897865513,
+    "2-3 Hz": 0.9931694629506942,
+    "3-4 Hz": 0.9945475234420954
+   },
+   "sim_amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.9889629548474883,
+    "1-2 Hz": 0.9736221915069863,
+    "2-3 Hz": 0.9322765461808037,
+    "3-4 Hz": 0.8650045588085422
+   }
+  },
+  "read_period_ms": 13.018187833949924
+ },
+ "gx4m_joint14": {
+  "steps": [
+   {
+    "step_deg": 5.0,
+    "real": {
+     "t10_ms": 40.96270794980228,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 3.5054690000000055
+    },
+    "sim": {
+     "t10_ms": null,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.0
+    },
+    "max_current_ma": 73.0
+   },
+   {
+    "step_deg": -5.0,
+    "real": {
+     "t10_ms": 40.99125904031098,
+     "rise_ms": 1288.9425118919462,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -0.47000245454545725
+    },
+    "sim": {
+     "t10_ms": 12.995440978556871,
+     "rise_ms": 55.994977010414004,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -0.0015359688200501554
+    },
+    "max_current_ma": 60.0
+   }
+  ],
+  "ramps": [],
+  "chirp": {
+   "delay_ms": 63.0,
+   "sim_delay_ms": 35.0,
+   "amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.5625731608895068,
+    "1-2 Hz": 0.6328718204020866,
+    "2-3 Hz": 0.6503941615783299,
+    "3-4 Hz": 0.6072900806858809
+   },
+   "sim_amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.9907402880926521,
+    "1-2 Hz": 0.9739837458120276,
+    "2-3 Hz": 0.9308969024670848,
+    "3-4 Hz": 0.8924708890866097
+   }
+  },
+  "read_period_ms": 13.006572844460607
+ },
+ "gx4m_joint15": {
+  "steps": [
+   {
+    "step_deg": 5.000000000000001,
+    "real": {
+     "t10_ms": 26.072185952216387,
+     "rise_ms": 83.86787702329457,
+     "overshoot_pct": 6.898956091030595,
+     "steady_error_deg": -0.24390616517394342
+    },
+    "sim": {
+     "t10_ms": null,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.0
+    },
+    "max_current_ma": 58.0
+   },
+   {
+    "step_deg": -5.000000000000001,
+    "real": {
+     "t10_ms": 41.030896827578545,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -1.7184791651739444
+    },
+    "sim": {
+     "t10_ms": 12.991472845897079,
+     "rise_ms": 55.99189712665975,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -6.3611093629270335e-15
+    },
+    "max_current_ma": 77.0
+   },
+   {
+    "step_deg": 14.999999999999996,
+    "real": {
+     "t10_ms": 40.99042690359056,
+     "rise_ms": 69.00875316932797,
+     "overshoot_pct": 18.180246726587978,
+     "steady_error_deg": -1.4899591197194022
+    },
+    "sim": {
+     "t10_ms": 12.9878930747509,
+     "rise_ms": 55.999638978391886,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.010969586527843581
+    },
+    "max_current_ma": 97.0
+   },
+   {
+    "step_deg": -14.999999999999998,
+    "real": {
+     "t10_ms": 40.00149993225932,
+     "rise_ms": 119.99015090987086,
+     "overshoot_pct": 0.380149857464529,
+     "steady_error_deg": -0.8199951651739453
+    },
+    "sim": {
+     "t10_ms": 13.044163817539811,
+     "rise_ms": 53.965921979397535,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -6.3611093629270335e-15
+    },
+    "max_current_ma": 100.0
+   }
+  ],
+  "ramps": [
+   {
+    "speed": 0.5,
+    "lag_deg": 1.6354422009236877,
+    "sim_lag_deg": 1.0527237152047846
+   },
+   {
+    "speed": 1.0,
+    "lag_deg": 3.241341512476067,
+    "sim_lag_deg": 1.8709935248608136
+   },
+   {
+    "speed": 2.0,
+    "lag_deg": 5.778309171027438,
+    "sim_lag_deg": 3.4967965723539107
+   }
+  ],
+  "chirp": {
+   "delay_ms": 65.0,
+   "sim_delay_ms": 36.0,
+   "amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.8086989187786665,
+    "1-2 Hz": 0.8438290938694506,
+    "2-3 Hz": 0.8261763674103128,
+    "3-4 Hz": 0.7305083579264947
+   },
+   "sim_amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.9899520119480293,
+    "1-2 Hz": 0.9756168292445664,
+    "2-3 Hz": 0.9369910078368706,
+    "3-4 Hz": 0.8861889634719786
+   }
+  },
+  "read_period_ms": 13.01239908207208
+ },
+ "gx4m_joint16": {
+  "steps": [
+   {
+    "step_deg": 5.000000000000001,
+    "real": {
+     "t10_ms": 25.983512867242098,
+     "rise_ms": 84.92244221270084,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.3225867090929192
+    },
+    "sim": {
+     "t10_ms": null,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.0
+    },
+    "max_current_ma": 53.0
+   },
+   {
+    "step_deg": -5.0,
+    "real": {
+     "t10_ms": 28.946420177817345,
+     "rise_ms": null,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -0.7125312909070773
+    },
+    "sim": {
+     "t10_ms": 12.950326083227992,
+     "rise_ms": 56.9899829570204,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": -1.5902773407317584e-15
+    },
+    "max_current_ma": 63.0
+   },
+   {
+    "step_deg": 14.999999999999998,
+    "real": {
+     "t10_ms": 40.974989999085665,
+     "rise_ms": 84.00945807807148,
+     "overshoot_pct": 15.977261493784777,
+     "steady_error_deg": -0.751679290907076
+    },
+    "sim": {
+     "t10_ms": 12.976607074961066,
+     "rise_ms": 55.996965849772096,
+     "overshoot_pct": 0.0,
+     "steady_error_deg": 0.022860750352165445
+    },
+    "max_current_ma": 91.0
+   }
+  ],
+  "ramps": [
+   {
+    "speed": 0.5,
+    "lag_deg": 1.40750185392469,
+    "sim_lag_deg": 1.0644252798827556
+   },
+   {
+    "speed": 1.0,
+    "lag_deg": 2.6142331710274385,
+    "sim_lag_deg": 1.9107572007266833
+   },
+   {
+    "speed": 2.0,
+    "lag_deg": 5.709608461934523,
+    "sim_lag_deg": 3.4387560708978184
+   }
+  ],
+  "chirp": {
+   "delay_ms": 56.0,
+   "sim_delay_ms": 36.0,
+   "amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.8878107695287537,
+    "1-2 Hz": 0.9317279578141845,
+    "2-3 Hz": 0.9228565806179021,
+    "3-4 Hz": 0.8537266351671082
+   },
+   "sim_amplitude_ratio_by_band": {
+    "0.2-1 Hz": 0.98849976127309,
+    "1-2 Hz": 0.9748249341937176,
+    "2-3 Hz": 0.9286674721080929,
+    "3-4 Hz": 0.8765321747770998
+   }
+  },
+  "read_period_ms": 13.005988905206323
+ }
+}

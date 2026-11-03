@@ -33,6 +33,10 @@ OFFSET_DEG = 90.
 # Sync-read replies come one after another, each after the motor's 500 us return delay (register 9 = 250):
 # about 12 ms for 16 motors measured at 1 Mbps, while the SDK waits only about 6 ms for all of them.
 SYNC_READ_TIMEOUT_MS = 30.
+# Single register writes get the SDK's own reply window (about 4 ms). Another thread of the process (the arm's CAN
+# loop in tasks/dexlong_gear3/robot_server.py) can hold the GIL past it; the reply then comes late and garbles the
+# next transaction. Writes and reads are retried after the late bytes are flushed.
+ATTEMPTS, RETRY_FLUSH_SEC = 3, .01
 
 
 def load_hand_config(path=CONFIG_PATH):
@@ -95,9 +99,18 @@ class DynamixelBus:
         if error:
             raise RuntimeError(f'{what}: {self.packet.getRxPacketError(error)}')
 
+    def _flush(self):
+        time.sleep(RETRY_FLUSH_SEC)
+        self.port.clearPort()
+
     def _write(self, size, motor, address, value):
         write = {1: self.packet.write1ByteTxRx, 2: self.packet.write2ByteTxRx}[size]
-        self._check(*write(self.port, motor, address, value), f'motor {motor} register {address}')
+        for attempt in range(ATTEMPTS):
+            result, error = write(self.port, motor, address, value)
+            if result == self.sdk.COMM_SUCCESS or attempt == ATTEMPTS - 1:
+                break
+            self._flush()
+        self._check(result, error, f'motor {motor} register {address}')
 
     def setup(self, curr_limit, goal_current, goal_pwm):
         """GEX16 Motor.init_config without the LED blink: torque off, current limit, mode 5, goal current, PWM."""
@@ -113,10 +126,14 @@ class DynamixelBus:
             self._write(1, i, TORQUE_ENABLE, int(bool(on)))
 
     def read(self):
-        result = self.reader.txPacket()
-        if result == self.sdk.COMM_SUCCESS:
-            self.port.setPacketTimeoutMillis(SYNC_READ_TIMEOUT_MS)
-            result = self.reader.rxPacket()
+        for attempt in range(ATTEMPTS):
+            result = self.reader.txPacket()
+            if result == self.sdk.COMM_SUCCESS:
+                self.port.setPacketTimeoutMillis(SYNC_READ_TIMEOUT_MS)
+                result = self.reader.rxPacket()
+            if result == self.sdk.COMM_SUCCESS or attempt == ATTEMPTS - 1:
+                break
+            self._flush()
         if result != self.sdk.COMM_SUCCESS:
             raise RuntimeError(f'Sync read of the hand positions: {self.packet.getTxRxResult(result)}')
         units = []

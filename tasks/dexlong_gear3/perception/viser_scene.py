@@ -132,12 +132,12 @@ class SceneViewer:
         camera = self.server.scene.add_frame('/camera', axes_length=.16, axes_radius=.0006, origin_radius=.0012)
         set_pose(camera, self.T_world_cam)
         self.frustum = self.server.scene.add_camera_frustum('/camera/frustum',
-            fov=np.deg2rad(55), aspect=4/3, scale=.15, color=(255, 180, 40))
+            fov=np.deg2rad(55), aspect=4/3, scale=.05, thickness=2, thickness_units='screen', color=(255, 180, 40))
         self.part = self.server.scene.add_frame('/part', axes_length=.12, axes_radius=.0006,
                                                 origin_radius=.0012, visible=False)
         self.server.scene.add_mesh_trimesh('/part/gear', gear)
         gui = self.server.gui
-        gui.add_markdown('## 固定相机与零件位姿\n' +
+        self.intro = gui.add_markdown('## 固定相机与零件位姿\n' +
                          ('**合成演示/标定数据，非真机测量。**\n\n' if calibration.get('synthetic') else '') +
                          '机器人显示参考关节姿态，不读取或控制真机。相机光轴为 +Z。')
         gui.add_markdown('读取图像内参后更新视锥；没有内参时视锥仅作示意。')

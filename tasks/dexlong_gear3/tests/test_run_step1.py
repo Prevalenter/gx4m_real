@@ -26,7 +26,7 @@ HANDEYE = ROOT/'apps/charuco_handeye/runtime/calibration_20261031_fkzero/handeye
 
 class StaleGearPose(FixedGearPose):
     def get(self):
-        return self.T.copy(), 1.
+        return self.T.copy(), 2.
 
 
 class Step1RunnerTests(unittest.TestCase):
@@ -61,6 +61,14 @@ class Step1RunnerTests(unittest.TestCase):
         self.assertLessEqual(steps.max(), self.iface.arm_speed_scale*self.iface.dt + 1e-9)
         self.assertEqual(rows[0]['obs'].shape, (self.iface.obs_dim,))
         self.assertEqual(runner.arm.mode, 'hold')
+
+    def test_pose_age_limit(self):
+        runner = self.runner(StaleGearPose(self.iface.ref['object_pos'], self.iface.ref['object_quat']))
+        q = runner.joints()
+        self.assertEqual(runner.max_pose_age, 1.)
+        self.assertIsNone(runner.gear_pose(q)[0])           # 2 s old
+        runner.max_pose_age = 2.5
+        self.assertIsNotNone(runner.gear_pose(q)[0])
 
     def test_stale_pose_stops_and_holds(self):
         runner = self.runner(StaleGearPose(self.iface.ref['object_pos'], self.iface.ref['object_quat']))
@@ -97,13 +105,13 @@ class GearPoseTests(unittest.TestCase):
             time.sleep(.01)
         np.testing.assert_allclose(pose, T)
         self.assertLess(age, .5)
+        # Lost tracking keeps the last valid pose; its age grows until max_pose_age rejects it.
         sender.sendto(json.dumps({'timestamp_monotonic': time.monotonic(), 'object_in_camera': None}).encode(),
                       address)
-        for _ in range(100):
-            if receiver.get()[0] is None:
-                break
-            time.sleep(.01)
-        self.assertIsNone(receiver.get()[0])
+        time.sleep(.1)
+        pose, later = receiver.get()
+        np.testing.assert_allclose(pose, T)
+        self.assertGreater(later, age + .05)
 
     @unittest.skipUnless(HANDEYE.exists(), 'no hand-eye result')
     def test_eye_to_hand_camera_to_env(self):

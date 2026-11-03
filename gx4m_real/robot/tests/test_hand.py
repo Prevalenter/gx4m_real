@@ -18,6 +18,7 @@ class FakeSDK:
 
     def __init__(self, present):
         self.present, self.log, self.goals, self.fail_read = dict(present), [], [], False
+        self.write_misses = self.read_misses = 0            # transactions that time out before one succeeds
         sdk = self
 
         class PortHandler:
@@ -37,11 +38,17 @@ class FakeSDK:
             def closePort(self):
                 sdk.log.append(('close',))
 
+            def clearPort(self):
+                sdk.log.append(('flush',))
+
         class PacketHandler:
             def __init__(self, protocol):
                 sdk.protocol = protocol
 
             def write1ByteTxRx(self, port, motor, address, value):
+                if sdk.write_misses:
+                    sdk.write_misses -= 1
+                    return -3001, 0
                 sdk.log.append((motor, address, value))
                 return 0, 0
 
@@ -69,6 +76,9 @@ class FakeSDK:
             def rxPacket(self):
                 if sdk.read_timeout_ms is None or sdk.read_timeout_ms < 20:
                     return -3001                       # 16 real replies take about 12 ms
+                if sdk.read_misses:
+                    sdk.read_misses -= 1
+                    return -3001
                 return -3001 if sdk.fail_read else 0
 
             def isAvailable(self, motor, address, size):
@@ -168,6 +178,20 @@ class HandDriverTests(unittest.TestCase):
         driver.close()
         self.assertEqual(sdk.log[-1], ('close',))
         with self.assertRaises(RuntimeError):
+            driver.read()
+
+    def test_missed_replies_are_flushed_and_retried(self):
+        driver, sdk = make_driver({i: 1024 for i in range(1, 17)})
+        sdk.write_misses = H.ATTEMPTS - 1
+        driver.connect()
+        self.assertEqual(sdk.log[:H.ATTEMPTS], [('flush',)]*(H.ATTEMPTS - 1) + [(1, H.TORQUE_ENABLE, 0)])
+        sdk.read_misses = H.ATTEMPTS - 1
+        driver.read()
+        sdk.write_misses = H.ATTEMPTS
+        with self.assertRaisesRegex(RuntimeError, 'register'):
+            driver.torque(True)
+        sdk.read_misses = H.ATTEMPTS
+        with self.assertRaisesRegex(RuntimeError, 'Sync read'):
             driver.read()
 
     def test_feedback_reader_never_writes(self):

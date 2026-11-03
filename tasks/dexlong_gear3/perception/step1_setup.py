@@ -13,9 +13,11 @@ not visible through the gear (and does not matter for step1).
 Both checks are always shown: distance to the training pose cannot tell whether the gear is physically on a pin.
 
 Every pose is also forwarded over UDP (--target, as publish_gear_pose.py), so the same perception process keeps
-feeding run_step1.py after the check:
+feeding run_step1.py after the check. The robot buttons (robot_panel.py: connect / disconnect arm and hand, hand
+guiding, start pose, policy, stop) drive tasks/dexlong_gear3/robot_server.py, which then takes those poses instead:
 
   bash tasks/dexlong_gear3/perception/run_setup.sh --calibration <handeye_result.json>
+  bash tasks/dexlong_gear3/run_robot_server.sh --handeye <handeye_result.json> --hand-port /dev/ttyUSB0
   python tasks/dexlong_gear3/perception/step1_setup.py --demo     # synthetic gear on the pin, no camera or GPU
 """
 from __future__ import annotations
@@ -272,6 +274,8 @@ def main(argv=None):
     parser.add_argument('--reference', type=Path, default=REFERENCE)
     parser.add_argument('--initial-pose', type=Path, default=DEFAULT_INITIAL)
     parser.add_argument('--target', default='127.0.0.1:5701', help="Forward poses to run_step1.py ('' to disable)")
+    parser.add_argument('--robot', default='127.0.0.1:5702',
+                        help="robot_server.py behind the robot buttons ('' to hide them)")
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8088)
     args, inference_args = parser.parse_known_args(argv)
@@ -292,6 +296,10 @@ def main(argv=None):
     plate = json.loads(args.plate.read_text(encoding='utf-8')) if args.plate else None
     viewer = Step1Setup(calibration, reference=reference, plate=plate, initial=initial, host=args.host, port=args.port,
                         live=not args.demo)
+    if args.robot:
+        from robot_panel import RobotPanel
+        host, port = args.robot.rsplit(':', 1)
+        RobotPanel(viewer, (host, int(port)))
     print(f'Viser: http://{args.host}:{viewer.server.get_port()}', flush=True)
     try:
         if args.demo:

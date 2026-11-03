@@ -10,8 +10,9 @@ Gear pose: tasks/dexlong_gear3/perception/publish_gear_pose.py (or step1_setup.p
 FoundationPose's gear24 object_in_camera per frame over UDP; it becomes env-frame through the hand-eye result
 (eye-to-hand: T_world_base @ T_base_cam; eye-in-hand: FK(Link7) @ T_flange_cam). The gear24 mesh is the
 simulation's gear body frame, so no mesh-to-gear transform is needed (--mesh-to-object only for another mesh).
-Only the calibrated camera (T_base_cam / T_flange_cam) is taken from the hand-eye result; the env frame comes from
-the reference robot base pose, not from the base pose recorded with the hand-eye session. Place the plate with
+The calibrated camera (T_base_cam / T_flange_cam) and the joint compensation it was solved with are taken from the
+hand-eye result; the env frame comes from the reference robot base pose, not from the base pose recorded with the
+hand-eye session. Place the plate with
 perception/step1_setup.py first (it uses the same base pose, from config/initial_pose.json).
 
 Tactile: not wired yet (PaXini mapping and calibration pending), the policy sees no contact.
@@ -45,6 +46,7 @@ sys.path.insert(0, str(ROOT))
 
 from gx4m_real.policy import RslRlActor                         # noqa: E402
 from gx4m_real.robot.arm import ArmDriver                       # noqa: E402
+from gx4m_real.robot.compensation import JointCompensation      # noqa: E402
 from gx4m_real.robot.config import load_config                  # noqa: E402
 from gx4m_real.robot.hand import HandDriver                     # noqa: E402
 from gx4m_real.robot.kinematics import matrix_quat, quat_matrix  # noqa: E402
@@ -53,6 +55,7 @@ from tasks.dexlong_gear3.step1 import Step1Interface            # noqa: E402
 MODEL = HERE/'models'/'step1_lstm_20261103_iter4750.pt'
 CONTROL_CONFIG = ROOT/'apps'/'control'/'config.yaml'
 START_RANGE = .02           # trained gear start: +-2 cm in x and y (reset_position_noise), any yaw
+HAND_START_TOLERANCE = .1   # rad; current-based position control stops a little short of the goal
 
 
 def pose_matrix(pos, quat):
@@ -62,9 +65,10 @@ def pose_matrix(pos, quat):
 
 
 class UdpGearPose:
-    """Newest gear pose from publish_gear_pose.py: JSON datagrams {"timestamp_monotonic", "object_in_camera"}
-    (4x4 or null when tracking is lost). Age is measured on the sender's frame time (same host, shared
-    monotonic clock) or, with same_host=False, on the receive time."""
+    """Newest valid gear pose from publish_gear_pose.py: JSON datagrams {"timestamp_monotonic", "object_in_camera"}
+    (4x4 or null when tracking is lost). A lost frame keeps the last valid pose, which ages until the caller's
+    max_pose_age rejects it, so a short occlusion does not stop the policy. Age is measured on the sender's frame
+    time (same host, shared monotonic clock) or, with same_host=False, on the receive time."""
 
     def __init__(self, port, host='127.0.0.1', same_host=True):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -87,11 +91,13 @@ class UdpGearPose:
                 stamp = float(record['timestamp_monotonic']) if self.same_host else time.monotonic()
             except (ValueError, KeyError, TypeError):
                 continue
+            if pose is None:
+                continue
             with self.lock:
-                self.latest = (stamp, None if pose is None else np.asarray(pose, dtype=np.float64))
+                self.latest = (stamp, np.asarray(pose, dtype=np.float64))
 
     def get(self):
-        """(T_cam_object 4x4 or None, age in s); (None, inf) before the first message."""
+        """(last valid T_cam_object 4x4, its age in s); (None, inf) before the first valid pose."""
         with self.lock:
             latest = self.latest
         if latest is None:
@@ -173,25 +179,22 @@ class Rate:
 class Step1Runner:
     """Robot side of the loop; arm is an ArmDriver (motor frame), hand a HandDriver, gear a pose source."""
 
-    def __init__(self, iface, actor, arm, hand, gear, camera, *, arm_speed_scale=None, max_pose_age=.3,
-                 max_tracking_error=.3, approach_speed=.2, log=print):
+    def __init__(self, iface, actor, arm, hand, gear, camera, *, arm_speed_scale=None, max_pose_age=1.,
+                 max_tracking_error=.3, approach_speed=.2, hand_approach_speed=1., log=print):
         self.iface, self.actor, self.arm, self.hand, self.gear, self.camera = iface, actor, arm, hand, gear, camera
         self.comp = arm.config.compensation
         self.arm_speed_scale, self.max_pose_age = arm_speed_scale, max_pose_age
         self.max_tracking_error, self.approach_speed, self.log = max_tracking_error, approach_speed, log
+        self.hand_approach_speed = hand_approach_speed     # hand_to_start alone; the trained finger limit is 3 rad/s
         self.rate = Rate(1./iface.dt)
+        self.stop_request = threading.Event()     # set from another thread: move_to_start / episode hold and return
 
     def joints(self):
         """Measured joints (23,) in the reference order, model frame."""
-        self.arm.update()
-        if self.arm.mode == 'fault':
-            raise RuntimeError(f'Arm fault: {self.arm.error}')
-        return np.concatenate((self.comp.to_model(self.arm.q), self.hand.read()))
+        return np.concatenate((self.arm_joints(), self.hand.read()))
 
     def send(self, targets):
-        motor = np.clip(self.comp.to_motor(targets[:7]), self.arm.config.lower, self.arm.config.upper)
-        self.arm.command(motor)
-        self.arm.update()
+        self.send_arm(targets[:7])
         self.hand.command(targets[7:])
 
     def hold(self):
@@ -206,22 +209,62 @@ class Step1Runner:
             return None, age
         return self.camera(T_cam, q), age
 
-    def move_to_start(self, timeout=30.):
-        """Straight joint-space move to the reference initial pose at approach_speed (rad/s)."""
-        goal = np.array(self.iface.ref['initial_joint_pos'])
-        q = self.joints()
-        start, distance = q.copy(), np.abs(goal - q)
-        duration = max(float(distance.max())/self.approach_speed, self.iface.dt)
+    def arm_joints(self):
+        self.arm.update()
+        if self.arm.mode == 'fault':
+            raise RuntimeError(f'Arm fault: {self.arm.error}')
+        return self.comp.to_model(self.arm.q)
+
+    def send_arm(self, targets):
+        self.arm.command(np.clip(self.comp.to_motor(targets), self.arm.config.lower, self.arm.config.upper))
+        self.arm.update()
+
+    def _ramp(self, read, send, goal, settled, timeout, speed=None):
+        """Straight joint-space move from the measured joints to goal at speed (rad/s, default approach_speed), then
+        wait until settled(q); the measured joints, or None if stop_request was set."""
+        q = read()
+        start = q.copy()
+        duration = max(float(np.abs(goal - start).max())/(speed or self.approach_speed), self.iface.dt)
         t0 = time.monotonic()
         while True:
+            if self.stop_request.is_set():
+                return None
             s = min((time.monotonic() - t0)/duration, 1.)
-            self.send(start + s*(goal - start))
+            send(start + s*(goal - start))
             self.rate.sleep()
-            q = self.joints()
-            if s >= 1 and np.abs(q[:7] - goal[:7]).max() < .02:
+            q = read()
+            if s >= 1 and (settled(q) or time.monotonic() - t0 > duration + timeout):
                 return q
-            if time.monotonic() - t0 > duration + timeout:
-                raise RuntimeError(f'Did not reach the start pose: arm error {np.abs(q[:7]-goal[:7]).max():.3f} rad')
+
+    def move_to_start(self, timeout=30.):
+        """Arm and hand to the reference initial pose together; None if stopped (then holding)."""
+        goal = np.array(self.iface.ref['initial_joint_pos'])
+        q = self._ramp(self.joints, self.send, goal, lambda q: np.abs(q[:7] - goal[:7]).max() < .02, timeout)
+        if q is None:
+            self.hold()
+        elif np.abs(q[:7] - goal[:7]).max() >= .02:
+            raise RuntimeError(f'Did not reach the start pose: arm error {np.abs(q[:7]-goal[:7]).max():.3f} rad')
+        return q
+
+    def arm_to_start(self, timeout=30.):
+        """The arm alone to its initial pose (the hand is not touched); None if stopped (then holding)."""
+        goal = np.array(self.iface.ref['initial_joint_pos'][:7])
+        q = self._ramp(self.arm_joints, self.send_arm, goal, lambda q: np.abs(q - goal).max() < .02, timeout)
+        if q is None:
+            self.arm.hold()
+        elif np.abs(q - goal).max() >= .02:
+            raise RuntimeError(f'Did not reach the start pose: arm error {np.abs(q - goal).max():.3f} rad')
+        return q
+
+    def hand_to_start(self, timeout=3.):
+        """The hand alone to its initial pose at hand_approach_speed (the arm is not touched); None if stopped (then
+        holding). A finger that is blocked is left commanded to the goal, its error shows in the returned joints."""
+        goal = np.array(self.iface.ref['initial_joint_pos'][7:])
+        q = self._ramp(self.hand.read, self.hand.command, goal, lambda q: np.abs(q - goal).max() < HAND_START_TOLERANCE,
+                       timeout, self.hand_approach_speed)
+        if q is None:
+            self.hand.command(self.hand.read())
+        return q
 
     def episode(self, max_steps=None):
         """One policy episode from the start pose; returns (outcome, per-step log)."""
@@ -233,6 +276,9 @@ class Step1Runner:
         k = 0
         try:
             while max_steps is None or k < max_steps:
+                if self.stop_request.is_set():
+                    outcome = 'stopped'
+                    break
                 late = self.rate.sleep()
                 q = self.joints()
                 T, age = self.gear_pose(q)
@@ -278,6 +324,34 @@ def save_episode(path, rows, outcome):
     np.savez_compressed(path, outcome=outcome, **data)
 
 
+def load_actor(path, iface):
+    actor = RslRlActor(path)
+    if (actor.obs_dim, actor.action_dim) != (iface.obs_dim, len(iface.joint_order)):
+        raise ValueError(f'{path} does not match the reference: {actor.obs_dim} -> {actor.action_dim}')
+    return actor
+
+
+def arm_config(path, iface, handeye=None, velocity=None):
+    """Control config at the trained PVT speed limit (or velocity). A hand-eye result that records its joint
+    compensation replaces the control one: its calibrated camera is only consistent with that compensation."""
+    config = load_config(path)
+    config = dataclasses.replace(config, velocity_limit=velocity or float(max(iface.ref['velocity_limit'][:7])))
+    recorded = json.loads(Path(handeye).read_text(encoding='utf-8')).get('joint_compensation') if handeye else None
+    if recorded:
+        compensation = JointCompensation(tuple(recorded['directions']), tuple(recorded['offsets_deg']))
+        if compensation != config.compensation:
+            print(f"Joint compensation of the hand-eye result ({recorded.get('source', handeye)}), offsets "
+                  f"{list(compensation.offsets_deg)} deg, replaces {config.compensation_path} "
+                  f"({list(config.compensation.offsets_deg)} deg)")
+        config = dataclasses.replace(config, compensation=compensation,
+                                     compensation_path=Path(recorded['source']) if 'source' in recorded else None)
+    model_lower, model_upper = config.compensation.model_limits(config.lower, config.upper)
+    gap = max(np.abs(model_lower - iface.lower[:7]).max(), np.abs(model_upper - iface.upper[:7]).max())
+    if gap > np.radians(1.):
+        print(f'WARNING: real arm limits differ from the trained ones by up to {np.degrees(gap):.1f} deg')
+    return config
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--model', type=Path, default=MODEL)
@@ -294,7 +368,8 @@ def main(argv=None):
     parser.add_argument('--arm-velocity', type=float, help='PVT speed limit, rad/s (default: the trained limit)')
     parser.add_argument('--arm-speed-scale', type=float, help='Arm rad/s per unit action (default: trained)')
     parser.add_argument('--approach-speed', type=float, default=.2, help='Move to the start pose, rad/s')
-    parser.add_argument('--max-pose-age', type=float, default=.3, help='s; trained with up to 0.13 s')
+    parser.add_argument('--max-pose-age', type=float, default=1.,
+                        help='s: tracking lost this long stops the episode (trained with poses up to 0.13 s old)')
     parser.add_argument('--max-tracking-error', type=float, default=.3, help='Arm target - measured, rad')
     parser.add_argument('--yes', action='store_true', help='No keypress prompts (mock runs)')
     parser.add_argument('--out', type=Path, help='New directory for logs (default: runs/step1_<time>)')
@@ -303,16 +378,8 @@ def main(argv=None):
         parser.error('--handeye is required on the real robot')
 
     iface = Step1Interface()
-    actor = RslRlActor(args.model)
-    if (actor.obs_dim, actor.action_dim) != (iface.obs_dim, len(iface.joint_order)):
-        raise ValueError(f'{args.model} does not match the reference: {actor.obs_dim} -> {actor.action_dim}')
-    trained_velocity = float(max(iface.ref['velocity_limit'][:7]))
-    config = load_config(args.config)
-    config = dataclasses.replace(config, velocity_limit=args.arm_velocity or trained_velocity)
-    model_lower, model_upper = config.compensation.model_limits(config.lower, config.upper)
-    gap = max(np.abs(model_lower - iface.lower[:7]).max(), np.abs(model_upper - iface.upper[:7]).max())
-    if gap > np.radians(1.):
-        print(f'WARNING: real arm limits differ from the trained ones by up to {np.degrees(gap):.1f} deg')
+    actor = load_actor(args.model, iface)
+    config = arm_config(args.config, iface, args.handeye, args.arm_velocity)
     mesh_to_object = np.loadtxt(args.mesh_to_object) if args.mesh_to_object else None
     print('WARNING: tactile is not wired, the policy sees no finger contact')
     out = args.out or HERE/'runs'/datetime.now().strftime('step1_%Y%m%d_%H%M%S')

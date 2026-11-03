@@ -106,7 +106,7 @@ C:/mjfit/python.exe tasks/dexlong_gear3/tools/mujoco_closed_loop.py --learning .
 - 固定相机：`T_world_base @ T_base_cam`
 - 腕部相机：`FK(Link7) @ T_flange_cam`
 
-手眼标定结果只取相机外参 `T_base_cam` / `T_flange_cam`。`T_world_base` 一律用参考配置里的基座位姿：主循环用 `step1_reference.json`，感知工具用 `initial_pose.json`。标定文件里记录的基座位姿只是采集时的值，和参考配置不一致时会打印提示。这样训练侧换了基座，旧标定仍可使用，前提是相机和机械臂之间的相对位置没变。
+手眼标定结果取相机外参 `T_base_cam` / `T_flange_cam`，以及求解它时用的关节补偿（`handeye_result.json` 的 `joint_compensation`）：外参只和这组补偿一致，所以它替换 `apps/control/joint_compensation.yaml`，不同时会打印两组偏移。现在的外参 `he_20261102_185319_j1p87` 带 J1 +8.7°，控制配置是 J1 = 0，主循环和下面的控制进程都按 +8.7° 换算。`T_world_base` 一律用参考配置里的基座位姿：主循环用 `step1_reference.json`，感知工具用 `initial_pose.json`。标定文件里记录的基座位姿只是采集时的值，和参考配置不一致时会打印提示。这样训练侧换了基座，旧标定仍可使用，前提是相机和机械臂之间的相对位置没变。
 
 ```bash
 # 感知（另一个终端）：Viser 摆放检查，同时把位姿转发给主循环
@@ -133,11 +133,37 @@ python tasks/dexlong_gear3/run_step1.py --mock --yes --max-steps 60
 安全设置：
 - PVT 速度上限（`--arm-velocity`）默认 1.5 rad/s，就是训练时 PhysX 的关节速度上限，不用 `apps/control/config.yaml` 里示教用的 0.25。策略目标本身最多 0.15 rad/s。力矩比例、`max_joint_step_rad` 和 CAN 参数仍读这个配置文件。
 - `--arm-speed-scale` 可以降低策略每步的手臂速度，首次上机建议先降速。
-- 齿轮位姿超过 `--max-pose-age`（默认 0.3 s，训练覆盖到 0.13 s）没更新，或手臂目标与实测之差超过 `--max-tracking-error`（默认 0.3 rad），立即停止并保持姿态；Ctrl-C 也一样。
+- 感知跟丢的帧不会立即停止策略：继续用最后一个有效位姿，它超过 `--max-pose-age`（默认 1 s；训练里的位姿延迟只到 0.13 s，丢失期间策略看到的是旧位姿）还没更新时才停止。Viser 按钮启动策略时仍要求位姿不超过 0.3 s。手臂目标与实测之差超过 `--max-tracking-error`（默认 0.3 rad）时立即停止。两种情况都保持当前姿态；Ctrl-C 也一样。
+- 手挡在相机和齿轮之间时，`perception/gear_tracker.py` 把比渲染齿轮近 1 cm 以上的像素当作遮挡：它们不计入轮廓 IoU 和深度残差（至少 25% 的轮廓要可见，记录在 `frames.jsonl` 的 `visible_fraction`），跟踪时也从 FoundationPose 的深度输入里去掉，避免手把位姿拉向相机。抓起后齿轮被大部分包住时仍会跟丢，那时需要用手的运动学推算位姿（尚未实现）。
 
 日志在 `tasks/dexlong_gear3/runs/step1_<时间>/`：`run.json` 是参数，`episode_XXX.npz` 记录每步的观测、动作、目标、关节、齿轮位姿、位姿延迟、阶段、关键点距离和时序。
 
 测试：`python -m unittest tasks/dexlong_gear3/tests/test_run_step1.py -v`。
+
+### 在 Viser 里用按钮控制
+
+摆放检查页面的“机械臂与灵巧手”面板可以代替上面命令行主循环的回车操作。按钮由单独的控制进程 `tasks/dexlong_gear3/robot_server.py` 执行：Viser 在 foundationpose 环境里，机械臂、灵巧手和策略在 gear3_control 环境里（需要 CPU 版 torch，`apps/control/setup.sh` 已包含）。两个终端分别运行：
+
+```bash
+bash tasks/dexlong_gear3/run_robot_server.sh --handeye apps/charuco_handeye/runtime/<标定目录>/handeye_result.json --hand-port /dev/ttyUSB0
+bash tasks/dexlong_gear3/perception/run_setup.sh --calibration apps/charuco_handeye/runtime/<标定目录>/handeye_result.json --gpu 1
+```
+
+控制进程监听 127.0.0.1:5702，随机认证密钥写在 `$XDG_RUNTIME_DIR/gx4m_step1_robot.key`（权限 0600），页面从这里读取，没连上时每 2 秒重试。齿轮位姿仍由摆放检查进程通过 UDP 5701 转发，所以启动它时不要加 `--target ''`。速度、补偿、超时等参数和 `run_step1.py` 相同。
+
+按钮（只有当前状态下能用的才可点）：
+- **连接 / 断开机械臂**：连接后保持当前位置；断开会让电机失能，手臂可能下落，先扶住。
+- **连接 / 断开灵巧手**：连接后保持当前位置；断开会关闭扭矩。
+- **拖动模式 / 退出拖动模式**：J1–J7 失能，可以手动拖动，先扶住；退出后在当前位置恢复出力。
+- **机械臂回初始位置 / 灵巧手回初始位置**：分开执行，只需要对应的那个已连接，另一个不动。机械臂以 `--approach-speed`（默认 0.2 rad/s）、手以 `--hand-approach-speed`（默认 1 rad/s，训练时手指限速 3 rad/s）走到参考初始姿态。手指是电流位置控制，差 0.1 rad 以内算到位；被挡住时目标保持下发，状态栏显示差得最多的关节。
+- **开始执行策略**：要求机械臂在初始位置（差 ≤ 0.02 rad）、手在初始位置（差 < 0.1 rad）、齿轮位姿新鲜且在训练起点范围内（x、y 各 ±2 cm，z ±5 mm），不满足时拒绝并说明原因。每次的记录存为 `episode_XXX.npz`。
+- **停止**：打断回初始位置或策略，保持当前姿态。
+
+机械臂的 CAN 线程和手的串口读写在同一个进程里，手的单个寄存器写入（SDK 只等约 4 ms 回包）可能因为 GIL 被占而错过回包，晚到的回包又会弄乱下一次收发，所以 `hand.py` 对写入和同步读取都会清空串口后重试，最多 3 次。
+
+动作一次只执行一个；空闲时控制进程保持机械臂目标并读取手的关节，页面上的机器人模型显示真机实时关节。关闭 Viser 会停止正在执行的动作，机械臂和手保持原状态；在控制进程的终端按 Ctrl-C，会先保持姿态，再等回车后断开机械臂。
+
+测试：`python -m unittest tasks/dexlong_gear3/tests/test_robot_server.py -v`。
 
 ## 灵巧手
 

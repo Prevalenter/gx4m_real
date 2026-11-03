@@ -20,5 +20,7 @@ python -m pip install --no-deps pyorbbecsdk2==2.1.2
 python -m pip install --no-deps -e "${CONTROL_DIR}/../../third_party/libgx7"
 python -m pip install --no-deps -e "${CONTROL_DIR}/../../third_party/gex16"
 python -m pip install --no-deps -e "${CONTROL_DIR}/../.."
+# The step1 policy (tasks/dexlong_gear3/robot_server.py) runs its LSTM on the CPU.
+python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 python -m pip freeze > "${CONTROL_DIR}/runtime/pip-freeze.txt"
 printf 'Ready: bash %s/run.sh\n' "${CONTROL_DIR}"

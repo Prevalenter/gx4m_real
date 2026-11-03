@@ -195,6 +195,55 @@ with HandDriver('COM5') as hand:           # connect()：保持当前姿态并�
 
 测试：`python -m unittest gx4m_real.robot.tests.test_hand -v`（假 SDK，不接串口）。
 
+## 关节响应辨识
+
+用来对比真机和训练里的执行器模型。两个工具都在 `tasks/dexlong_gear3/tools/`，记录存在 `tasks/dexlong_gear3/runs/`。该目录默认被 git 忽略，下面这几次采集是强制加入版本库的。
+
+**灵巧手**（`identify_hand.py`）：一次只动一个关节，其他关节保持 step1 初始手型。依次做：
+- ±5° 和 ±15° 阶跃；
+- 20° 斜坡，速度 0.5、1、2 rad/s；
+- 0.2–4 Hz 扫频。
+
+目标按 30 Hz 下发，电流、速度、位置按约 75 Hz 读取（`HandDriver.read_state`）。动之前先只读查询机械臂的姿态，检查手的所有连杆离桌面 ≥ 5 cm、手指之间 ≥ 12 mm。运行中出现堵转或偏离目标太远就停止。`--analyze` 会把同样的目标输入训练时的关节模型（刚度、阻尼、电机转子惯量、摩擦、力矩上限取自 `step1_reference.json`），和真机一起算出上升时间、斜坡滞后、互相关延迟和扫频幅值比。
+
+```bash
+python tasks/dexlong_gear3/tools/identify_hand.py --port /dev/ttyUSB0 --scale .25    # 先用 25% 幅值
+python tasks/dexlong_gear3/tools/identify_hand.py --analyze tasks/dexlong_gear3/runs/hand_ident_<时间>
+```
+
+**机械臂**（`identify_arm.py`）：走和策略相同的控制链路——手眼标定那组关节补偿、30 Hz 下发、PVT 速度上限 1.5 rad/s、力矩系数 0.85，反馈约 60 Hz。在 step1 初始姿态做：
+- ±2° 和 ±5° 阶跃；
+- 8° 斜坡，速度 0.05、0.1、0.15、0.3 rad/s；
+- 0.1–2 Hz 扫频。
+
+整套计划的每一段都先做离线碰撞检查：URDF 碰撞网格上的采样点要离桌面 ≥ 5 cm、离底板 ≥ 3 cm、不进入相机周围 12 cm 的球、前臂和手离立柱和上臂 ≥ 1 cm。不通过的段会被剔除并列出来；斜坡会先试另一个方向。真机只能在 `--hardware` 打开的 Viser 页面上由操作员点按钮启动，命令行没有让真机动的方式：
+1. 连接机械臂和灵巧手；
+2. 回初始位置（先检查这段直线移动是否安全）；
+3. 开始采集；
+4. 断开。
+
+另有"停止"按钮，按下后保持当前姿态。运行中任一关节偏离目标超过 0.15 rad，或者实测姿态离桌面太近、进入相机禁区，都会停下并保持。
+
+```bash
+python tasks/dexlong_gear3/tools/identify_arm.py --preview                                # 只看计划，不连 CAN
+python tasks/dexlong_gear3/tools/identify_arm.py --hardware --mock                        # 按钮驱动模拟的机械臂和手
+python tasks/dexlong_gear3/tools/identify_arm.py --hardware --hand-port /dev/ttyUSB0      # 真机
+```
+
+已有采集（2026-11-03）：
+
+| 目录 | 内容 |
+|---|---|
+| `runs/hand_ident_20261103_210157/` | 灵巧手关节 1、2、5，25% 幅值 |
+| `runs/hand_ident_20261103_210506/` | 灵巧手全部 16 个关节，全幅；目标 PWM 200，位置 P 增益 250（13 号 2100） |
+| `runs/arm_ident_20261103_223122/` | 机械臂 7 个关节，初始姿态，5.8 分钟，没有触发停止 |
+
+每个目录里，`plan.json` 记录计划和设置，`joint_XX.npz` / `run.npz` 是原始数据（字段见各工具的文档字符串），`report.json` 是灵巧手的分析结果。
+
+灵巧手的结论：比仿真慢约 1.5–2 倍，多出约 30 ms 延迟，有 1–4° 的死区，侧摆关节 5、9、14 和关节 6、10 最明显。电流只有 100–175 mA，限制手指的是位置 P 增益低和 PWM 上限，不是电流。
+
+测试：`python -m unittest tasks.dexlong_gear3.tests.test_identify_hand tasks.dexlong_gear3.tests.test_identify_arm`。
+
 ## step1 真机部署：待补充的硬件部分
 
 `step1.py` 只管观测、动作映射和阶段判断，不碰硬件。接入真机还缺：

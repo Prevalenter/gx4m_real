@@ -27,6 +27,8 @@ UPPER = np.array([1.57, 2.1, 1.57, 1.57, .25, 1.57, 1.57, 1.57, .25, 1.57, 1.57,
 # XL330 control table (protocol 2.0), as GEX16 motor.py.
 OPERATING_MODE, CURRENT_LIMIT, TORQUE_ENABLE = 11, 38, 64
 GOAL_PWM, GOAL_CURRENT, GOAL_POSITION, PRESENT_POSITION = 100, 102, 116, 132
+PRESENT_CURRENT, PRESENT_VELOCITY = 126, 128    # with PRESENT_POSITION one 10-byte block: int16, int32, int32
+RPM_PER_UNIT = .229                             # present velocity unit; present current is 1 mA per unit
 CURRENT_BASED_POSITION = 5
 DEG_PER_UNIT = .087891
 OFFSET_DEG = 90.
@@ -125,24 +127,40 @@ class DynamixelBus:
         for i in self.ids:
             self._write(1, i, TORQUE_ENABLE, int(bool(on)))
 
-    def read(self):
+    def _sync_read(self, reader, fields, what):
+        """Signed values (16, len(fields)) of (address, size) fields in one sync-read transaction."""
         for attempt in range(ATTEMPTS):
-            result = self.reader.txPacket()
+            result = reader.txPacket()
             if result == self.sdk.COMM_SUCCESS:
                 self.port.setPacketTimeoutMillis(SYNC_READ_TIMEOUT_MS)
-                result = self.reader.rxPacket()
+                result = reader.rxPacket()
             if result == self.sdk.COMM_SUCCESS or attempt == ATTEMPTS - 1:
                 break
             self._flush()
         if result != self.sdk.COMM_SUCCESS:
-            raise RuntimeError(f'Sync read of the hand positions: {self.packet.getTxRxResult(result)}')
-        units = []
-        for i in self.ids:
-            if not self.reader.isAvailable(i, PRESENT_POSITION, 4):
-                raise RuntimeError(f'Motor {i} returned no present position')
-            value = self.reader.getData(i, PRESENT_POSITION, 4)
-            units.append(value - 2**32 if value >= 2**31 else value)
-        return np.array(units, dtype=np.int64)
+            raise RuntimeError(f'Sync read of the hand {what}: {self.packet.getTxRxResult(result)}')
+        values = np.empty((len(self.ids), len(fields)), dtype=np.int64)
+        for k, i in enumerate(self.ids):
+            for f, (address, size) in enumerate(fields):
+                if not reader.isAvailable(i, address, size):
+                    raise RuntimeError(f'Motor {i} returned no {what}')
+                value = reader.getData(i, address, size)
+                values[k, f] = value - 2**(8*size) if value >= 2**(8*size - 1) else value
+        return values
+
+    def read(self):
+        return self._sync_read(self.reader, [(PRESENT_POSITION, 4)], 'positions')[:, 0]
+
+    def read_state(self):
+        """Present current (mA), velocity (units of 0.229 rpm) and position (units), each (16,), in one read."""
+        if getattr(self, 'state_reader', None) is None:
+            self.state_reader = self.sdk.GroupSyncRead(self.port, self.packet, PRESENT_CURRENT, 10)
+            for i in self.ids:
+                if not self.state_reader.addParam(i):
+                    raise RuntimeError(f'Cannot add motor {i} to the state sync read')
+        values = self._sync_read(self.state_reader, [(PRESENT_CURRENT, 2), (PRESENT_VELOCITY, 4),
+                                                     (PRESENT_POSITION, 4)], 'state')
+        return values[:, 0], values[:, 1], values[:, 2]
 
     def write(self, units):
         self.writer.clearParam()
@@ -198,6 +216,14 @@ class SimulatedBus:
         self._advance()
         return np.rint(self.units).astype(np.int64)
 
+    def read_state(self):
+        before, start = self.units.copy(), self.last
+        self._advance()
+        rate = (self.units - before)/max(self.last - start, 1e-6)
+        rpm = rate*DEG_PER_UNIT/6.                      # units/s -> deg/s -> rev/min
+        return np.zeros(len(self.units), np.int64), np.rint(rpm/RPM_PER_UNIT).astype(np.int64), \
+            np.rint(self.units).astype(np.int64)
+
     def write(self, units):
         self._advance()
         self.goal = np.asarray(units, dtype=float).copy()
@@ -251,6 +277,14 @@ class HandDriver:
         self._require()
         self.q = units_to_urdf(self.bus.read(), self.directions)
         return self.q.copy()
+
+    def read_state(self):
+        """Joint angles (rad), velocities (rad/s) and motor currents (mA, sign as the joint), each (16,)."""
+        self._require()
+        current, velocity, units = self.bus.read_state()
+        self.q = units_to_urdf(units, self.directions)
+        qd = np.deg2rad(np.asarray(velocity, float)*RPM_PER_UNIT*6.)*self.directions
+        return self.q.copy(), qd, np.asarray(current, float)*self.directions
 
     def command(self, q):
         """Send joint targets (16,) rad, clipped to the URDF limits; returns the targets sent."""

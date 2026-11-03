@@ -19,6 +19,7 @@ class FakeSDK:
     def __init__(self, present):
         self.present, self.log, self.goals, self.fail_read = dict(present), [], [], False
         self.write_misses = self.read_misses = 0            # transactions that time out before one succeeds
+        self.velocity, self.current = {i: 0 for i in present}, {i: 0 for i in present}
         sdk = self
 
         class PortHandler:
@@ -62,7 +63,7 @@ class FakeSDK:
 
         class GroupSyncRead:
             def __init__(self, port, packet, address, size):
-                assert (address, size) == (H.PRESENT_POSITION, 4)
+                assert (address, size) in ((H.PRESENT_POSITION, 4), (H.PRESENT_CURRENT, 10))
                 self.ids = []
 
             def addParam(self, motor):
@@ -85,7 +86,9 @@ class FakeSDK:
                 return motor in self.ids
 
             def getData(self, motor, address, size):
-                return sdk.present[motor] % 2**32        # the SDK returns the unsigned register value
+                value = {H.PRESENT_POSITION: sdk.present, H.PRESENT_VELOCITY: sdk.velocity,
+                         H.PRESENT_CURRENT: sdk.current}[address][motor]
+                return value % 2**(8*size)              # the SDK returns the unsigned register value
 
         class GroupSyncWrite:
             def __init__(self, port, packet, address, size):
@@ -193,6 +196,16 @@ class HandDriverTests(unittest.TestCase):
         sdk.read_misses = H.ATTEMPTS
         with self.assertRaisesRegex(RuntimeError, 'Sync read'):
             driver.read()
+
+    def test_state_units_and_signs(self):
+        driver, sdk = make_driver({i: 1024 for i in range(1, 17)})
+        driver.connect()
+        sdk.velocity = {i: 100 for i in range(1, 17)}       # 22.9 rpm = 137.4 deg/s
+        sdk.current = {i: -250 for i in range(1, 17)}       # negative int16
+        q, qd, current = driver.read_state()
+        np.testing.assert_allclose(q, H.units_to_urdf(np.full(16, 1024), driver.directions))
+        np.testing.assert_allclose(qd, np.deg2rad(137.4)*driver.directions)
+        np.testing.assert_allclose(current, -250*driver.directions)
 
     def test_feedback_reader_never_writes(self):
         present = {i: 1000 + 7*i for i in range(1, 17)}

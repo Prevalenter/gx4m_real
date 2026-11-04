@@ -21,10 +21,10 @@ gx4m_real/
 │   └── orbbec/                 # capture_rgbd、rgbd_view、pointcloud_view
 ├── tasks/
 │   └── dexlong_gear3/          # 三齿轮装配任务
-│       ├── config/             # initial_pose.json、wrist_camera.json、step1_reference.json（来自 gx4m_learning）
-│       ├── models/             # 部署用的策略 checkpoint（step1：30 Hz LSTM）
-│       ├── step1.py            # step1 观测构造、动作→关节目标、阶段状态机（预插→插入→撤手）
-│       ├── run_step1.py        # step1 真机 30 Hz 主循环（机械臂 PVT、灵巧手、UDP 齿轮位姿）
+│       ├── config/             # initial_pose.json、wrist_camera.json、step1/step2_reference.json（来自 gx4m_learning）
+│       ├── models/             # 部署用的策略 checkpoint（step1、step2：30 Hz LSTM）
+│       ├── step1.py            # step1/step2 观测构造、动作→关节目标、阶段状态机（预插→插入→撤手）
+│       ├── run_step1.py        # step1/step2 真机 30 Hz 主循环（--step；机械臂 PVT、灵巧手、UDP 齿轮位姿）
 │       ├── tests/              # 与 Isaac 导出 rollout 逐步对比（观测、目标、LSTM 动作、阶段）
 │       ├── tools/              # mujoco_closed_loop.py：用 MuJoCo 替身代替硬件跑闭环
 │       ├── perception/         # gear24 位姿估计（FoundationPose）、UDP 发送、Viser 场景和 step1 摆放检查
@@ -94,6 +94,24 @@ C:/mjfit/python.exe tasks/dexlong_gear3/tools/mujoco_closed_loop.py --learning .
 
 `step1.py` 读取 `arm_moving_average`，手臂和手指分开平滑。旧版本两者都用 0.36，换上新模型后手臂只有 0.054 rad/s。
 
+### step2 策略
+
+step2 把 gear48（黄色）装到右销钉上，左销钉上已经装好 gear24。观测、动作映射和阶段逻辑与 step1 相同，只是参考配置不同，所以 `step1.py` 不区分步骤，由 `step1.REFERENCES` / `MODELS` 按步骤选择参考配置和模型。主循环、控制进程、摆放检查和 MuJoCo 闭环工具都加 `--step 2`。导出方法同上（`--step 2`，rollout 用 600 步，覆盖 4 个回合），文件是 `config/step2_reference.json` 和 `tests/data/step2_isaac_rollout.npz`。
+
+当前模型是 `step2_lstm_20261104_iter4000.pt`，来自 gx4m_learning 的 `gx4m_dexlong_gear3_split_step2/2026-11-04_04-18-41/model_4000.pt`，从头训练约 8.8 小时。训练条件：
+- 基座和初始关节与 step1 相同（`initial_pose.json` 两步共用）；
+- 关节响应用辨识结果：手臂 PD 1600/40，加一阶滞后（J1–J4 0.75 s，J5–J7 0.17 s）；手指按关节分别设刚度、阻尼和摩擦；
+- 手指平滑 `act_moving_average` 0.1，每步手指目标最多变化关节范围的 10%（step1 是 0.36）；
+- 任意两指接触就拿满接触奖励。
+
+结果：
+- 训练成功率约 0.97（最近 1024 个回合）；
+- Isaac 录像 4 次全部成功，每次 4.8–6.4 s；
+- 回放测试通过：观测、目标和 LSTM 动作都和 Isaac 一致；
+- 没做 Isaac 确定性评估和 MuJoCo 闭环。
+
+**底板位置和 step1 不同**：step2 训练时底板在 y = -0.210，step1 在 -0.125，差 8.5 cm；起点 y 也改为 -0.098。真机按 step2 的训练位置摆底板，用 `run_setup.sh --step 2` 核对，把 gear48 套到右销钉上检查。
+
 ## step1 真机运行
 
 `tasks/dexlong_gear3/run_step1.py` 是 30 Hz 主循环。每步依次执行：
@@ -117,6 +135,9 @@ bash tasks/dexlong_gear3/perception/run_publish.sh --target 127.0.0.1:5701
 python tasks/dexlong_gear3/run_step1.py --handeye apps/charuco_handeye/runtime/<标定目录>/handeye_result.json --hand-port COM5
 # 不接硬件，模拟机械臂和手，齿轮固定在参考起点
 python tasks/dexlong_gear3/run_step1.py --mock --yes --max-steps 60
+# step2：感知跟踪 gear48，主循环用 step2 的参考配置和模型
+bash tasks/dexlong_gear3/perception/run_setup.sh --step 2 --calibration apps/charuco_handeye/runtime/<标定目录>/handeye_result.json
+python tasks/dexlong_gear3/run_step1.py --step 2 --handeye apps/charuco_handeye/runtime/<标定目录>/handeye_result.json --hand-port COM5
 ```
 
 流程：
@@ -149,7 +170,7 @@ bash tasks/dexlong_gear3/run_robot_server.sh --handeye apps/charuco_handeye/runt
 bash tasks/dexlong_gear3/perception/run_setup.sh --calibration apps/charuco_handeye/runtime/<标定目录>/handeye_result.json --gpu 1
 ```
 
-控制进程监听 127.0.0.1:5702，随机认证密钥写在 `$XDG_RUNTIME_DIR/gx4m_step1_robot.key`（权限 0600），页面从这里读取，没连上时每 2 秒重试。齿轮位姿仍由摆放检查进程通过 UDP 5701 转发，所以启动它时不要加 `--target ''`。速度、补偿、超时等参数和 `run_step1.py` 相同。
+控制进程监听 127.0.0.1:5702，随机认证密钥写在 `$XDG_RUNTIME_DIR/gx4m_step1_robot.key`（权限 0600），页面从这里读取，没连上时每 2 秒重试。齿轮位姿仍由摆放检查进程通过 UDP 5701 转发，所以启动它时不要加 `--target ''`。速度、补偿、超时等参数和 `run_step1.py` 相同。跑 step2 时两个进程都要加 `--step 2`。
 
 按钮（只有当前状态下能用的才可点）：
 - **连接 / 断开机械臂**：连接后保持当前位置；断开会让电机失能，手臂可能下落，先扶住。

@@ -1,7 +1,8 @@
-"""Step1 interface and policy against a deterministic Isaac Lab rollout (no Isaac, no hardware).
+"""Step1 / step2 interface and policy against deterministic Isaac Lab rollouts (no Isaac, no hardware).
 
 tests/data/step1_isaac_rollout.npz is gx4m_learning's export_gear3_split_sim2sim_reference.py --step 1 output
 for models/step1_lstm_20261103_iter4750.pt (domain randomization off, nominal start, 400 steps, three
+episodes), step2_isaac_rollout.npz the --step 2 output for models/step2_lstm_20261104_iter4000.pt (600 steps, four
 episodes): per step k the Isaac policy observation obs[k], its action[k], and the joint positions q[k],
 joint targets targets[k], gear pose and stage after that action, which the next observation obs[k+1] is
 built from. On a step with done[k] the recorded state is already the reset one.
@@ -17,10 +18,7 @@ sys.path.insert(0, str(HERE.parent))
 
 from gx4m_real.policy import RslRlActor  # noqa: E402
 from gx4m_real.robot.kinematics import quat_matrix  # noqa: E402
-from step1 import Step1Interface  # noqa: E402
-
-ROLLOUT = HERE/'data'/'step1_isaac_rollout.npz'
-MODEL = HERE.parent/'models'/'step1_lstm_20261103_iter4750.pt'
+from step1 import MODELS, REFERENCES, Step1Interface, load_reference  # noqa: E402
 
 
 def slices(fields):
@@ -32,10 +30,13 @@ def slices(fields):
 
 
 class Step1RolloutTests(unittest.TestCase):
+    STEP, SMOOTHING = 1, .36        # finger filter at 30 Hz, not control['smoothing'] (60 Hz)
+
     @classmethod
     def setUpClass(cls):
-        cls.rollout = dict(np.load(ROLLOUT))
-        cls.iface = Step1Interface()
+        cls.rollout = dict(np.load(HERE/'data'/f'step{cls.STEP}_isaac_rollout.npz'))
+        cls.model = MODELS[cls.STEP]
+        cls.iface = Step1Interface(load_reference(REFERENCES[cls.STEP]))
         cls.cols = slices(cls.iface.fields)
 
     def replay(self):
@@ -57,7 +58,7 @@ class Step1RolloutTests(unittest.TestCase):
 
     def test_rollout_covers_every_stage(self):
         r = self.rollout
-        self.assertEqual(self.iface.ref['task'], 'gear3_split_step1')
+        self.assertEqual(self.iface.ref['task'], f'gear3_split_step{self.STEP}')
         self.assertTrue(self.iface.ref['yaw_free_goal'])
         self.assertEqual(set(r['stage'].tolist()), {0, 1, 2})
         self.assertGreaterEqual(int(r['done'].sum()), 2)
@@ -76,7 +77,7 @@ class Step1RolloutTests(unittest.TestCase):
     def test_action_targets_match_isaac(self):
         r, iface = self.rollout, self.iface
         initial = np.array(iface.ref['initial_joint_pos'])
-        self.assertAlmostEqual(iface.smoothing, .36)          # 30 Hz filter, not control['smoothing'] (60 Hz)
+        self.assertAlmostEqual(iface.smoothing, self.SMOOTHING)
         err = 0.
         for k in range(len(r['action'])):
             iface.targets = initial if k == 0 or r['done'][k-1] else r['targets'][k-1]
@@ -89,7 +90,7 @@ class Step1RolloutTests(unittest.TestCase):
 
     def test_policy_matches_isaac(self):
         """The LSTM run step by step over the recorded observations, reset after every episode end."""
-        actor = RslRlActor(MODEL)
+        actor = RslRlActor(self.model)
         self.assertEqual((actor.kind, actor.obs_dim, actor.action_dim), ('lstm', self.iface.obs_dim, 23))
         err = 0.
         for o, a, done in zip(self.rollout['obs'], self.rollout['action'], self.rollout['done']):
@@ -100,7 +101,7 @@ class Step1RolloutTests(unittest.TestCase):
 
     def test_closed_loop_policy_on_rebuilt_observations(self):
         """Policy fed with rebuilt observations (own stage tracker) reproduces Isaac's actions end to end."""
-        actor = RslRlActor(MODEL)
+        actor = RslRlActor(self.model)
         err = 0.
         for k, obs in self.replay():
             if k > 0 and self.rollout['done'][k-1]:
@@ -143,6 +144,11 @@ class Step1RolloutTests(unittest.TestCase):
         info = iface.update(q, pos, quat)
         self.assertEqual(info['stage'], 1)
         np.testing.assert_allclose(iface.goal[0], iface.ref['final_pos'])
+
+
+class Step2RolloutTests(Step1RolloutTests):
+    """step2 (gear48 onto the right pin): same interface, its own reference and the slower finger filter."""
+    STEP, SMOOTHING = 2, .1
 
 
 if __name__ == '__main__':

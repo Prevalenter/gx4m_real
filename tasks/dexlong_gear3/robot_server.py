@@ -41,10 +41,10 @@ sys.path.insert(0, str(ROOT))
 from gx4m_real.camera.frame_ipc import receive, send            # noqa: E402
 from gx4m_real.robot.arm import ArmDriver                       # noqa: E402
 from gx4m_real.robot.hand import HandDriver                     # noqa: E402
-from tasks.dexlong_gear3.run_step1 import (CONTROL_CONFIG, HAND_START_TOLERANCE, MODEL, START_RANGE,  # noqa: E402
+from tasks.dexlong_gear3.run_step1 import (CONTROL_CONFIG, HAND_START_TOLERANCE, START_RANGE,  # noqa: E402
                                            CameraToEnv, Step1Runner, UdpGearPose, arm_config, load_actor,
                                            save_episode)
-from tasks.dexlong_gear3.step1 import Step1Interface            # noqa: E402
+from tasks.dexlong_gear3.step1 import MODELS, REFERENCES, Step1Interface, load_reference  # noqa: E402
 
 # Same expression in perception/robot_panel.py (other environment, no shared import).
 KEY_PATH = Path(os.environ.get('XDG_RUNTIME_DIR') or tempfile.gettempdir())/'gx4m_step1_robot.key'
@@ -256,7 +256,9 @@ def write_key(path=KEY_PATH):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--handeye', type=Path, help='handeye_result.json (required without --mock)')
-    parser.add_argument('--model', type=Path, default=MODEL)
+    parser.add_argument('--step', type=int, choices=sorted(REFERENCES), default=1,
+                        help='Split step; start step1_setup.py with the same --step')
+    parser.add_argument('--model', type=Path, help="Default: the step's deployed model")
     parser.add_argument('--config', type=Path, default=CONTROL_CONFIG, help='Arm config (CAN, limits)')
     parser.add_argument('--hand-port')
     parser.add_argument('--hand-serial')
@@ -270,13 +272,13 @@ def main(argv=None):
     parser.add_argument('--max-pose-age', type=float, default=1.,
                         help='s: tracking lost this long stops the policy (a start needs a pose under 0.3 s)')
     parser.add_argument('--max-tracking-error', type=float, default=.3)
-    parser.add_argument('--out', type=Path, help='Directory for episode logs (default: runs/step1_<time>)')
+    parser.add_argument('--out', type=Path, help='Directory for episode logs (default: runs/step<n>_<time>)')
     args = parser.parse_args(argv)
     if not args.mock and args.handeye is None:
         parser.error('--handeye is required on the real robot')
 
-    iface = Step1Interface()
-    actor = load_actor(args.model, iface)
+    iface = Step1Interface(load_reference(REFERENCES[args.step]))
+    actor = load_actor(args.model or MODELS[args.step], iface)
     config = arm_config(args.config, iface, args.handeye, args.arm_velocity)
     arm = ArmDriver(config, mock=args.mock)
     gear = UdpGearPose(args.pose_port)
@@ -284,7 +286,7 @@ def main(argv=None):
     runner = Step1Runner(iface, actor, arm, None, gear, camera, arm_speed_scale=args.arm_speed_scale,
                          max_pose_age=args.max_pose_age, max_tracking_error=args.max_tracking_error,
                          approach_speed=args.approach_speed, hand_approach_speed=args.hand_approach_speed)
-    out = args.out or HERE/'runs'/datetime.now().strftime('step1_%Y%m%d_%H%M%S')
+    out = args.out or HERE/'runs'/datetime.now().strftime(f'step{args.step}_%Y%m%d_%H%M%S')
     controller = RobotController(
         runner, lambda: HandDriver(args.hand_port, serial_number=args.hand_serial, mock=args.mock), out)
     host, port = args.listen.rsplit(':', 1)

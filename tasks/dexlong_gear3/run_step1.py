@@ -1,4 +1,8 @@
-"""Step1 policy on the real robot: a 30 Hz loop of measure -> observation -> LSTM -> joint targets.
+"""Step1 / step2 policy on the real robot: a 30 Hz loop of measure -> observation -> LSTM -> joint targets.
+
+--step 1 (default) inserts gear24 on the left pin, --step 2 gear48 on the right pin with gear24 already mounted;
+each step has its own reference and model (step1.REFERENCES / MODELS). The perception process must track that
+step's gear (step1_setup.py --step 2, or publish_gear_pose.py --gear gear48).
 
 Per control step (1/30 s, as the policy was trained):
   1. read the arm (GX7, PVT) and hand (GX16) joints, take the newest gear pose from the perception process;
@@ -25,6 +29,7 @@ powered until the operator confirms; disconnecting disables the motors (the arm 
 
   python tasks/dexlong_gear3/run_step1.py --mock --yes --max-steps 60          # no hardware
   python tasks/dexlong_gear3/run_step1.py --handeye <handeye_result.json> --hand-port COM5
+  python tasks/dexlong_gear3/run_step1.py --step 2 --handeye <handeye_result.json> --hand-port COM5
 """
 from __future__ import annotations
 
@@ -50,9 +55,9 @@ from gx4m_real.robot.compensation import JointCompensation      # noqa: E402
 from gx4m_real.robot.config import load_config                  # noqa: E402
 from gx4m_real.robot.hand import HandDriver                     # noqa: E402
 from gx4m_real.robot.kinematics import matrix_quat, quat_matrix  # noqa: E402
-from tasks.dexlong_gear3.step1 import Step1Interface            # noqa: E402
+from tasks.dexlong_gear3.step1 import MODELS, REFERENCES, Step1Interface, load_reference  # noqa: E402
 
-MODEL = HERE/'models'/'step1_lstm_20261103_iter4750.pt'
+MODEL = MODELS[1]
 CONTROL_CONFIG = ROOT/'apps'/'control'/'config.yaml'
 START_RANGE = .02           # trained gear start: +-2 cm in x and y (reset_position_noise), any yaw
 HAND_START_TOLERANCE = .1   # rad; current-based position control stops a little short of the goal
@@ -354,7 +359,8 @@ def arm_config(path, iface, handeye=None, velocity=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--model', type=Path, default=MODEL)
+    parser.add_argument('--step', type=int, choices=sorted(REFERENCES), default=1)
+    parser.add_argument('--model', type=Path, help="Default: the step's deployed model")
     parser.add_argument('--config', type=Path, default=CONTROL_CONFIG, help='Arm config (CAN, limits, compensation)')
     parser.add_argument('--handeye', type=Path, help='handeye_result.json (required without --mock)')
     parser.add_argument('--mesh-to-object', type=Path, help='4x4 (np.loadtxt) mesh frame -> Isaac gear frame')
@@ -372,20 +378,21 @@ def main(argv=None):
                         help='s: tracking lost this long stops the episode (trained with poses up to 0.13 s old)')
     parser.add_argument('--max-tracking-error', type=float, default=.3, help='Arm target - measured, rad')
     parser.add_argument('--yes', action='store_true', help='No keypress prompts (mock runs)')
-    parser.add_argument('--out', type=Path, help='New directory for logs (default: runs/step1_<time>)')
+    parser.add_argument('--out', type=Path, help='New directory for logs (default: runs/step<n>_<time>)')
     args = parser.parse_args(argv)
     if not args.mock and args.handeye is None:
         parser.error('--handeye is required on the real robot')
 
-    iface = Step1Interface()
+    iface = Step1Interface(load_reference(REFERENCES[args.step]))
+    args.model = args.model or MODELS[args.step]
     actor = load_actor(args.model, iface)
     config = arm_config(args.config, iface, args.handeye, args.arm_velocity)
     mesh_to_object = np.loadtxt(args.mesh_to_object) if args.mesh_to_object else None
     print('WARNING: tactile is not wired, the policy sees no finger contact')
-    out = args.out or HERE/'runs'/datetime.now().strftime('step1_%Y%m%d_%H%M%S')
+    out = args.out or HERE/'runs'/datetime.now().strftime(f'step{args.step}_%Y%m%d_%H%M%S')
     out.mkdir(parents=True, exist_ok=False)
     (out/'run.json').write_text(json.dumps(dict(
-        argv=sys.argv if argv is None else argv, model=str(args.model.resolve()), velocity_limit=config.velocity_limit,
+        argv=sys.argv if argv is None else argv, step=args.step, model=str(args.model.resolve()), velocity_limit=config.velocity_limit,
         arm_speed_scale=args.arm_speed_scale or iface.arm_speed_scale, torque_limit=config.torque_limit,
         max_joint_step_rad=config.max_joint_step_rad, handeye=str(args.handeye) if args.handeye else None,
         mesh_to_object=None if mesh_to_object is None else mesh_to_object.tolist(), tactile=None,

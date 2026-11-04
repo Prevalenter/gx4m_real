@@ -1,4 +1,8 @@
-"""Step1 scene check in Viser before running the policy, on the live gear24 pose (fixed calibrated camera).
+"""Step1 / step2 scene check in Viser before running the policy, on the live gear pose (fixed calibrated camera).
+
+--step 1 (default) tracks gear24 with the left pin as its target, --step 2 gear48 with the right pin (gear24 already
+mounted on the left one); the pin, start and plate below are that step's reference. Start run_step1.py /
+robot_server.py with the same --step.
 
 The Viser scene adds the training layout to viser_scene.py's robot, camera and detected gear: the plate with its
 pins at fixture_pos, the gear's final pose on the left pin (green), the pre-insert waypoint and the start pose
@@ -19,6 +23,7 @@ guiding, start pose, policy, stop) drive tasks/dexlong_gear3/robot_server.py, wh
   bash tasks/dexlong_gear3/perception/run_setup.sh --calibration <handeye_result.json>
   bash tasks/dexlong_gear3/run_robot_server.sh --handeye <handeye_result.json> --hand-port /dev/ttyUSB0
   python tasks/dexlong_gear3/perception/step1_setup.py --demo     # synthetic gear on the pin, no camera or GPU
+  bash tasks/dexlong_gear3/perception/run_setup.sh --step 2 --calibration <handeye_result.json>
 """
 from __future__ import annotations
 
@@ -38,6 +43,8 @@ from viser_scene import DEFAULT_INITIAL, SceneViewer, initial_base, load_calibra
 
 HERE = Path(__file__).resolve().parent
 REFERENCE = HERE.parent/'config'/'step1_reference.json'
+# Split step -> (reference, gear it inserts); as step1.REFERENCES (that module needs the robot environment).
+STEPS = {1: (REFERENCE, 'gear24'), 2: (HERE.parent/'config'/'step2_reference.json', 'gear48')}
 # Tolerances (m, deg). The stage switch is 3 mm over the gear keypoints; the policy saw a 1 mm goal-relative bias.
 PIN_XY, PIN_Z, PIN_TILT = .003, .003, 3.
 START_XY, START_Z, START_TILT = .02, .005, 5.
@@ -95,24 +102,24 @@ def plate_markdown(report, note=''):
     r = report
     return (f"**底板已检测（{note}）**\n\n"
             f"与训练位置对齐：{'✅' if r['ok'] else '❌'}\n\n"
-            f"左销钉处水平偏差 {r['xy']*1000:.1f} mm（x {mm(r['dx'])}，y {mm(r['dy'])}；要求 ≤ {PIN_XY*1000:.0f} mm），"
+            f"目标销钉处水平偏差 {r['xy']*1000:.1f} mm（x {mm(r['dx'])}，y {mm(r['dy'])}；要求 ≤ {PIN_XY*1000:.0f} mm），"
             f"高度 {mm(r['dz'])}（≤ {PIN_Z*1000:.0f} mm），倾斜 {r['tilt']:.1f}°（≤ {PIN_TILT:.0f}°），"
-            f"偏航 {r['yaw']:+.1f}°（step1 不要求）\n\n"
-            + ('' if r['ok'] else f"左销钉处按 x {mm(-r['dx'])}、y {mm(-r['dy'])} 移动底板。\n\n"))
+            f"偏航 {r['yaw']:+.1f}°（不要求）\n\n"
+            + ('' if r['ok'] else f"目标销钉处按 x {mm(-r['dx'])}、y {mm(-r['dy'])} 移动底板。\n\n"))
 
 
 def report_markdown(report):
     mm = lambda v: f'{v*1000:+.1f} mm'
     p, s = report['pin'], report['start']
     mark = lambda ok: '✅' if ok else '❌'
-    pin = (f"**1. 底板（齿轮套在左销钉上）** {mark(p['ok'])}\n\n"
+    pin = (f"**1. 底板（齿轮套在目标销钉上）** {mark(p['ok'])}\n\n"
            f"水平偏差 {p['xy']*1000:.1f} mm（x {mm(p['dx'])}，y {mm(p['dy'])}；要求 ≤ {PIN_XY*1000:.0f} mm），"
            f"高度 {mm(p['dz'])}（≤ {PIN_Z*1000:.0f} mm），倾斜 {p['tilt']:.1f}°（≤ {PIN_TILT:.0f}°）\n\n"
            + ('' if p['ok'] else f"底板按 x {mm(-p['dx'])}、y {mm(-p['dy'])} 移动（世界坐标轴）。\n\n"))
     start = (f"**2. 起点（齿轮平放在桌上）** {mark(s['ok'])}\n\n"
              f"x {mm(s['dx'])}，y {mm(s['dy'])}（各 ≤ ±{START_XY*1000:.0f} mm），高度 {mm(s['dz'])}"
              f"（≤ {START_Z*1000:.0f} mm），倾斜 {s['tilt']:.1f}°（≤ {START_TILT:.0f}°）\n\n")
-    head = '齿轮套在左销钉上时查看底板偏差；放在起点时查看起点偏差。\n\n'
+    head = '齿轮套在目标销钉上时查看底板偏差；放在起点时查看起点偏差。\n\n'
     return head + pin + start
 
 
@@ -124,12 +131,12 @@ def mesh_handle(server, name, mesh, color, opacity, T):
 
 
 class Step1Setup(SceneViewer):
-    def __init__(self, calibration, *, reference, history=15, plate=None, **kwargs):
-        super().__init__(calibration, gear=DEFAULT_GEAR, **kwargs)
+    def __init__(self, calibration, *, reference, history=15, plate=None, gear=DEFAULT_GEAR, **kwargs):
+        super().__init__(calibration, gear=gear, **kwargs)
         self.ref, self.history = reference, deque(maxlen=history)
         scene = self.server.scene
         plate_mesh = trimesh.load(PLATE_MESH, force='mesh')
-        gear = trimesh.load(gear_mesh_path(DEFAULT_GEAR), force='mesh')
+        gear = trimesh.load(gear_mesh_path(gear), force='mesh')
         r = reference
         mesh_handle(self.server, '/sim/plate', plate_mesh, (190, 195, 200), .3, pose(r['fixture_pos'], r['fixture_quat']))
         mesh_handle(self.server, '/sim/goal_gear', gear, (40, 200, 90), .35, pose(r['final_pos'], r['final_quat']))
@@ -139,7 +146,7 @@ class Step1Setup(SceneViewer):
         scene.add_frame('/sim/preinsert', axes_length=.08, axes_radius=.0006, origin_radius=.0012,
                         position=np.asarray(r['preinsert_pos']),
                         wxyz=np.asarray(r['preinsert_quat']))
-        scene.add_label('/sim/goal_label', '目标：左销钉', position=np.asarray(r['final_pos']) + [0, 0, .05])
+        scene.add_label('/sim/goal_label', '目标：目标销钉', position=np.asarray(r['final_pos']) + [0, 0, .05])
         scene.add_label('/sim/start_label', '起点 ±2 cm', position=np.asarray(r['object_pos']) + [0, 0, .05])
         gui = self.server.gui
         gui.add_markdown('## step1 摆放检查\n半透明灰色：底板的训练位置；绿色：齿轮插好的目标；黄色：起点和 ±2 cm 范围。'
@@ -271,7 +278,8 @@ def main(argv=None):
     parser.add_argument('--calibration', type=Path, help='Fixed-camera handeye_result.json')
     parser.add_argument('--demo', action='store_true', help='Synthetic gear on the pin, then at the start; no camera')
     parser.add_argument('--plate', type=Path, help='Show this plate_result.json from detect_plate.py until the button is pressed')
-    parser.add_argument('--reference', type=Path, default=REFERENCE)
+    parser.add_argument('--step', type=int, choices=sorted(STEPS), default=1, help='Split step: its reference and gear')
+    parser.add_argument('--reference', type=Path, help="Default: the step's reference")
     parser.add_argument('--initial-pose', type=Path, default=DEFAULT_INITIAL)
     parser.add_argument('--target', default='127.0.0.1:5701', help="Forward poses to run_step1.py ('' to disable)")
     parser.add_argument('--robot', default='127.0.0.1:5702',
@@ -283,7 +291,8 @@ def main(argv=None):
         parser.error('--calibration is required (or --demo)')
     if inference_args and args.demo:
         parser.error(f'Unknown options: {inference_args}')
-    reference = json.loads(args.reference.read_text(encoding='utf-8'))
+    reference_path, gear = STEPS[args.step]
+    reference = json.loads((args.reference or reference_path).read_text(encoding='utf-8'))
     initial = json.loads(args.initial_pose.read_text())
     if args.demo:
         C = np.eye(4)
@@ -294,8 +303,8 @@ def main(argv=None):
     else:
         calibration = load_calibration(args.calibration, initial)
     plate = json.loads(args.plate.read_text(encoding='utf-8')) if args.plate else None
-    viewer = Step1Setup(calibration, reference=reference, plate=plate, initial=initial, host=args.host, port=args.port,
-                        live=not args.demo)
+    viewer = Step1Setup(calibration, reference=reference, plate=plate, gear=gear, initial=initial, host=args.host,
+                        port=args.port, live=not args.demo)
     if args.robot:
         from robot_panel import RobotPanel
         host, port = args.robot.rsplit(':', 1)
@@ -319,7 +328,7 @@ def main(argv=None):
                 from publish_gear_pose import UdpPosePublisher
                 host, port = args.target.rsplit(':', 1)
                 observers.append(UdpPosePublisher(host, int(port)))
-            detect_live(['--gear', DEFAULT_GEAR, '--no-display', *inference_args], observer=Observers(*observers),
+            detect_live(['--gear', gear, '--no-display', *inference_args], observer=Observers(*observers),
                         frame_hook=plate_frame_hook(viewer, reference))
     except KeyboardInterrupt:
         pass

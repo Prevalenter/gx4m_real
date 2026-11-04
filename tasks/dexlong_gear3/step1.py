@@ -1,4 +1,7 @@
-"""Step1 (24-tooth gear onto the left pin) policy interface, outside Isaac Lab.
+"""Step1 (24-tooth gear onto the left pin) and step2 (48-tooth gear onto the right pin, the 24-tooth gear already
+mounted) policy interface, outside Isaac Lab. Both steps share the observation, control and stage logic below; their
+references differ only in poses and constants (step2: plate, start and goals of the 48-tooth gear, finger
+smoothing 0.1).
 
 Rebuilds the 78-wide policy observation of DexLongGear3SplitStep1Env from measured robot and gear
 state, turns the 23 policy actions into joint targets as gx4m_learning's dexlong_play_control, and runs
@@ -10,8 +13,8 @@ with the gear about its axis, so only position and tilt count (the policy input 
 The withdrawal succeeds once the gear stays within retract_success_tolerance * keypoint_scale (7.5 mm) of
 the final goal and every fingertip is retract_distance_threshold (20 cm) from the hub grasp point.
 
-config/step1_reference.json is exported by gx4m_learning's scripts/export_gear3_split_sim2sim_reference.py
-(--step 1): joint order and limits, palm and fingertip bodies and offsets, robot base pose, goals, stage
+config/step<n>_reference.json is exported by gx4m_learning's scripts/export_gear3_split_sim2sim_reference.py
+(--step n): joint order and limits, palm and fingertip bodies and offsets, robot base pose, goals, stage
 settings (p2p), control constants. All positions are in the Isaac env frame: the robot root link sits at
 base_pos / base_quat. Quaternions are wxyz except palm_rot inside the observation, which is xyzw like Isaac's.
 """
@@ -26,7 +29,10 @@ import numpy as np
 from gx4m_real.robot.kinematics import UrdfFK, quat_matrix
 
 HERE = Path(__file__).resolve().parent
-REFERENCE = HERE/'config'/'step1_reference.json'
+# Deployed policy per split step and the reference exported with it.
+REFERENCES = {1: HERE/'config'/'step1_reference.json', 2: HERE/'config'/'step2_reference.json'}
+MODELS = {1: HERE/'models'/'step1_lstm_20261103_iter4750.pt', 2: HERE/'models'/'step2_lstm_20261104_iter4000.pt'}
+REFERENCE = REFERENCES[1]
 URDF = HERE.parents[1]/'asset/gx7_right/urdf/gx7_right_gx4m_cam_xl330.urdf'
 
 
@@ -68,8 +74,8 @@ class Step1Interface:
         c = r['control']
         if c['kind'] != 'arm_increment_hand_absolute' or c['actions'] != len(self.joint_order):
             raise ValueError(f"Unsupported control {c['kind']!r} with {c['actions']} actions")
-        # control['smoothing'] is the 60 Hz constant (0.2); the 30 Hz env uses act_moving_average (0.36) for the
-        # fingers and arm_moving_average for the arm (older references have none: the arm uses the finger value).
+        # control['smoothing'] is the 60 Hz constant (0.2); the 30 Hz env uses act_moving_average (step1 0.36,
+        # step2 0.1) for the fingers and arm_moving_average for the arm (older references have none: the arm uses the finger value).
         self.smoothing, self.arm_speed_scale, self.dt = r['act_moving_average'], c['arm_speed_scale'], r['step_dt']
         self.arm_smoothing = r.get('arm_moving_average', self.smoothing)
         self.clip = r['clamp_abs_observations']

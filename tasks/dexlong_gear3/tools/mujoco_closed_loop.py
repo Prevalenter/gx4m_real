@@ -1,4 +1,4 @@
-"""Run the step1 deployment code closed-loop against gx4m_learning's MuJoCo replica as stand-in hardware.
+"""Run the step1 / step2 (--step) deployment code closed-loop against gx4m_learning's MuJoCo replica as stand-in hardware.
 
 MuJoCo only provides physics: measured joints, gear pose and fingertip contacts. Observation, policy, joint
 targets and the stage logic come from tasks/dexlong_gear3/step1.py and gx4m_real.policy, as on the real robot.
@@ -18,13 +18,14 @@ sys.path[:0] = [str(HERE.parents[2]), str(HERE.parent)]
 
 from gx4m_real.policy import RslRlActor  # noqa: E402
 from gx4m_real.robot.kinematics import quat_matrix  # noqa: E402
-from step1 import Step1Interface, load_reference  # noqa: E402
+from step1 import MODELS, REFERENCES, Step1Interface, load_reference  # noqa: E402
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--learning', type=Path, required=True, help='gx4m_learning checkout')
-    parser.add_argument('--model', type=Path, default=HERE.parent/'models'/'step1_lstm_20261103_iter4750.pt')
+    parser.add_argument('--step', type=int, choices=sorted(REFERENCES), default=1)
+    parser.add_argument('--model', type=Path, help="Default: the step's deployed model")
     parser.add_argument('--episodes', type=int, default=10)
     parser.add_argument('--substeps', type=int, default=40, help='MuJoCo substeps per 1/30 s step (1200 Hz)')
     parser.add_argument('--position-noise', type=float, default=.02, help='Gear start offset, uniform +-m in x, y')
@@ -38,7 +39,8 @@ def main():
     import mujoco
     import sim2sim_gear3_split_mujoco as replica
 
-    ref = load_reference()
+    ref = load_reference(REFERENCES[args.step])
+    args.model = args.model or MODELS[args.step]
     env = replica.MujocoGearEnv(ref, 1, args.substeps)
     iface, actor = Step1Interface(ref), RslRlActor(args.model)
     rng = None if args.fixed_start else np.random.default_rng(args.seed)
@@ -63,12 +65,7 @@ def main():
             if not args.zero_contact:
                 obs_err = max(obs_err, float(np.abs(obs - env.observation()).max()))
             targets = iface.apply_action(actor(obs), args.arm_speed_scale)
-            env.targets = targets                       # drive the replica with our targets
-            env.data.ctrl[env.act] = targets
-            for _ in range(env.substeps):
-                mujoco.mj_step(env.model, env.data)
-                v = env.data.qvel[env.vadr]
-                env.data.qvel[env.vadr] = np.clip(v, -env.velocity_limit, env.velocity_limit)
+            env.drive(targets)                          # the replica (with its arm drive lag) tracks our targets
             obj_pos, obj_quat = env.object_pose()
             env.stage = iface.stage
             dist_err = max(dist_err, abs(env.keypoint_distance() - iface.keypoint_distance(obj_pos, obj_quat)))

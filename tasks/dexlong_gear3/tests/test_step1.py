@@ -6,6 +6,10 @@ episodes), step2_isaac_rollout.npz the --step 2 output for models/step2_lstm_202
 episodes): per step k the Isaac policy observation obs[k], its action[k], and the joint positions q[k],
 joint targets targets[k], gear pose and stage after that action, which the next observation obs[k+1] is
 built from. On a step with done[k] the recorded state is already the reset one.
+
+tests/data/step{1,2}_isaac_reference.json is the reference exported with each rollout. The deployed
+config/step{1,2}_reference.json may differ from it in the robot base pose (moved after the export), which the
+observations depend on, so the rollouts are checked against their own export.
 """
 from pathlib import Path
 import sys
@@ -36,7 +40,7 @@ class Step1RolloutTests(unittest.TestCase):
     def setUpClass(cls):
         cls.rollout = dict(np.load(HERE/'data'/f'step{cls.STEP}_isaac_rollout.npz'))
         cls.model = MODELS[cls.STEP]
-        cls.iface = Step1Interface(load_reference(REFERENCES[cls.STEP]))
+        cls.iface = Step1Interface(load_reference(HERE/'data'/f'step{cls.STEP}_isaac_reference.json'))
         cls.cols = slices(cls.iface.fields)
 
     def replay(self):
@@ -55,6 +59,12 @@ class Step1RolloutTests(unittest.TestCase):
                 self.assertEqual(info['stage'], r['stage'][k-1], f'stage after step {k-1}')
             contact = r['obs'][k][self.cols['fingertip_object_contact']]   # needs PhysX contacts: taken as recorded
             yield k, iface.observation(q, pos, quat_matrix(quat)[:, 2], contact)
+
+    def test_deployed_reference_matches_export(self):
+        deployed = load_reference(REFERENCES[self.STEP])
+        for key in ('base_pos', 'base_quat'):
+            deployed.pop(key)
+        self.assertEqual(deployed, {k: v for k, v in self.iface.ref.items() if k not in ('base_pos', 'base_quat')})
 
     def test_rollout_covers_every_stage(self):
         r = self.rollout

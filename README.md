@@ -112,6 +112,16 @@ step2 把 gear48（黄色）装到右销钉上，左销钉上已经装好 gear24
 
 **底板位置和 step1 不同**：step2 训练时底板在 y = -0.210，step1 在 -0.125，差 8.5 cm；起点 y 也改为 -0.098。真机按 step2 的训练位置摆底板，用 `run_setup.sh --step 2` 核对，把 gear48 套到右销钉上检查。
 
+### 基座位姿更新（2026-11-04）
+
+训练侧把机器人基座从 (0.1196, -0.3107, 0.8868) 移到 (0.1196, -0.3337, 0.8858)：y 减 23 mm、z 减 1 mm，并绕世界 x 轴倾斜约 3.3°（`base_wxyz` (0.7068, 0.0202, 0.0202, -0.7068)）。同步了这些文件：
+- `config/initial_pose.json`：和训练侧 step1 一致，step0–step3 的基座和初始关节现在都相同。
+- `config/step1_reference.json` 和 `config/step2_reference.json`：只改了 `base_pos` / `base_quat`。
+
+手眼标定不用重做：外参是相机相对机械臂基座的 `T_base_cam`，主循环、摆放检查、底板检测和 Viser 场景都用 `initial_pose.json` 或参考配置里的基座重新算相机在世界里的位置（标定文件里记录的是采集时的基座，只用于提示）。前提是真机的相机和机械臂之间没有相对移动。
+
+当前的 step1 `model_4750` 和 step2 `model_4000` 是在旧基座下训练的，要按新基座重新训练。新模型训练好后，按上面的方法重新导出参考配置和 rollout；在那之前，回放测试用和 rollout 一起导出的旧参考（`tests/data/step{1,2}_isaac_reference.json`）。
+
 ## step1 真机运行
 
 `tasks/dexlong_gear3/run_step1.py` 是 30 Hz 主循环。每步依次执行：

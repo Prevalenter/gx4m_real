@@ -17,6 +17,8 @@ from gx4m_real.policy import RslRlActor                                 # noqa: 
 from gx4m_real.robot.arm import ArmDriver                               # noqa: E402
 from gx4m_real.robot.config import load_config                          # noqa: E402
 from gx4m_real.robot.hand import HandDriver                             # noqa: E402
+from gx4m_real.robot.tactile import FingertipContacts                   # noqa: E402
+from gx4m_real.robot.tests.test_tactile import FakeTotal                # noqa: E402
 from tasks.dexlong_gear3.run_step1 import (CONTROL_CONFIG, MODEL, CameraToEnv, FixedGearPose,  # noqa: E402
                                            Step1Runner, UdpGearPose, pose_matrix)
 from tasks.dexlong_gear3.step1 import Step1Interface                    # noqa: E402
@@ -84,6 +86,41 @@ class Step1RunnerTests(unittest.TestCase):
         outcome, rows = runner.episode(max_steps=90)
         self.assertEqual(outcome, 'tracking_error')
         self.assertLess(len(rows), 90)
+
+    def tactile_runner(self, normals):
+        sensors = [FakeTotal(n) for n in normals]
+        tactile = FingertipContacts(sensors, period=.001)
+        self.addCleanup(tactile.close)
+        runner = self.runner()
+        runner.tactile = tactile
+        return runner, sensors
+
+    def test_contact_reaches_the_observation(self):
+        """The resting force is tared away at the episode start; a press on thumb and ring finger becomes 1."""
+        runner, sensors = self.tactile_runner([3, 3, 3, 3])
+        outcome, rows = runner.episode(max_steps=1)
+        self.assertEqual(outcome, 'max_steps')
+        np.testing.assert_array_equal(rows[0]['contact'], [0, 0, 0, 0])
+        np.testing.assert_allclose(runner.tactile.offset, [.3]*4)
+        sensors[0].normal = sensors[3].normal = 9               # +0.6 N on thumb and ring finger
+        time.sleep(.02)
+        contact, force = runner.contacts()
+        np.testing.assert_array_equal(contact, [1, 0, 0, 1])
+        np.testing.assert_allclose(force, [.6, 0, 0, .6], atol=1e-9)
+        start = sum(w for n, w in self.iface.fields[:[n for n, _ in self.iface.fields].index('fingertip_object_contact')])
+        obs = self.iface.observation(self.iface.ref['initial_joint_pos'], self.iface.ref['object_pos'], [0, 0, 1.],
+                                     contact)
+        np.testing.assert_array_equal(obs[start:start + 4], [1, 0, 0, 1])
+
+    def test_lost_tactile_stops_and_holds(self):
+        runner, sensors = self.tactile_runner([0, 0, 0, 0])
+        runner.max_tactile_age = .05
+        runner.move_to_start()
+        sensors[1].fail = True
+        time.sleep(.1)
+        outcome, rows = runner.episode(max_steps=30)
+        self.assertEqual((outcome, rows), ('tactile_lost', []))
+        self.assertEqual(runner.arm.mode, 'hold')
 
 
 class GearPoseTests(unittest.TestCase):

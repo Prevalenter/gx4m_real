@@ -151,6 +151,15 @@ python tasks/dexlong_gear3/run_step1.py --step 2 --handeye apps/charuco_handeye/
 - 程序显示齿轮位置，确认后再按回车，策略开始运行。
 - 结束时保持当前姿态。程序退出前会再要求按一次回车才断开机械臂（断开会关电机，手臂可能下落，要先扶住）。
 
+触觉：主循环和控制进程默认打开 4 块 PaXini 指尖传感器（`gx4m_real/robot/tactile.py` 的 `FingertipContacts`），顺序是拇指、食指、中指、无名指，和仿真的指尖顺序（`gx4m_link4/8/12/16`）一致。每块传感器有一个后台线程轮询总力寄存器，周期 5 ms。处理方式：
+- 每个 episode 开始时，手张开停在初始姿态、不碰任何东西，取 0.2 s 的平均读数作为零点（去皮）；
+- 去皮后的法向力超过 `--tactile-threshold`（默认用参考配置的 `binary_tactile_threshold_n`，0.3 N）记为接触 1，否则为 0；
+- 原始计数按 0.1 N/计数换算，这个系数沿用 hora 部署里的值，没有自己标定过；
+- 任一传感器的读数超过 `--max-tactile-age`（默认 0.2 s）没有更新，就停止 episode，结果记为 `tactile_lost`，机械臂保持当前姿态；
+- 日志里每步记录 `contact` 和 `tactile_force`，控制台每秒打印一次接触状态，Viser 面板显示 4 指去皮后的力。
+
+`--no-tactile`（以及 `--mock`）把接触全给 0，此时策略基本无法成功。上机前先核对手指对应关系和阈值：运行 `python -m gx4m_real.robot.tactile`，它会先去皮 1 s，然后每 0.1 s 打印一次 4 指的力和接触状态，逐个按压手指检查。
+
 安全设置：
 - PVT 速度上限（`--arm-velocity`）默认 1.5 rad/s，就是训练时 PhysX 的关节速度上限，不用 `apps/control/config.yaml` 里示教用的 0.25。策略目标本身最多 0.15 rad/s。力矩比例、`max_joint_step_rad` 和 CAN 参数仍读这个配置文件。
 - `--arm-speed-scale` 可以降低策略每步的手臂速度，首次上机建议先降速。
@@ -271,13 +280,13 @@ python tasks/dexlong_gear3/tools/identify_arm.py --hardware --hand-port /dev/tty
 
 - [x] **灵巧手驱动**：`gx4m_real/robot/hand.py`（见上文“灵巧手”），角度约定与 GEX16 一致，关节顺序和上下限与 `step1_reference.json` 一致。
 - [ ] **灵巧手上机核对**：Windows 下 USB 串口延迟计时器设为 1 ms；用 `python -m gx4m_real.robot.hand --port COMx` 手动掰各关节，核对方向和零位（URDF 角度 = (电机读数 − 90°) × 方向）；仿真手指 PD 很软（刚度 3、阻尼 0.1、力矩上限 0.5 N·m），调电流/PWM 上限和位置增益，让响应接近仿真。
-- [ ] **PaXini 触觉**：确定每块传感器对应的手指（第 4 指含 `gx4m_link16` 和 `gx4m_link17`）；原始读数标定成牛顿，法向力 > 0.3 N 记 1；现有 `libgx7` 的 `TactileSerial` 一个串口读 2 块，4 指需要 2 个串口。
+- [x] **PaXini 触觉（代码）**：`FingertipContacts`（见上文“触觉”），每指一块传感器、一个串口，按 USB 序列号对应拇指、食指、中指、无名指（无名指即仿真第 4 指 `gx4m_link16`/`gx4m_link17`）。还没在实物上核对：手指对应关系、0.1 N/计数的换算、0.3 N 阈值下的噪声。
 - [x] **gear24 感知（代码）**：`live_gear36.py`、`detect_gear36.py`、`viser_scene.py` 默认改为 `--gear gear24`（网格 `asset/mjfit_gears3_split/assembly/gear24_visual.obj`，24 齿对称）；位姿换算到训练环境坐标系（相机 → 手眼标定 → 基座）由 `run_step1.py` 完成。
 - [ ] **gear24 感知（实测）**：分割取画面里齿轮颜色的最大连通域（gear24 红色，gear36 蓝色，gear48 黄色）。要在真实光照下确认红色范围合适，必要时用 `--hsv-low/--hsv-high` 调整；画面里不能有更大的红色物体。还要实测抓起后被手指遮挡时能不能跟住。训练覆盖的位姿延迟是 0–133 ms，主循环每步取最新一帧。
 - [x] **底板位置（工具）**：`perception/step1_setup.py` 用套在左销钉上的 gear24 核对底板；`perception/detect_plate.py` 直接测底板位姿（见上文“流程”）。
 - [ ] **底板测量（实测）**：在实物上运行 `run_plate.sh`，和 gear24 套销钉的结果对比，确认精度够用。
 - [ ] **底板位置（实测）**：按 Viser 提示把底板摆到位。
-- [x] **30 Hz 主循环**：`tasks/dexlong_gear3/run_step1.py`（见上文“step1 真机运行”）。触觉暂时全为 0。
+- [x] **30 Hz 主循环**：`tasks/dexlong_gear3/run_step1.py`（见上文“step1 真机运行”），触觉已接入。
 - [ ] **安全**：首次上机用 `apply_action(..., arm_speed_scale=...)` 降速；监控目标与实测关节的差，超阈值停机；工作空间限制和急停；每个阶段 600 步（20 s）超时。策略动作大多饱和在 ±1，手指会满幅切换、手腕会抖，这是策略本身的行为。
 - [ ] **手臂驱动参数**：PVT 速度上限设成训练用的 1.5 rad/s。`max_joint_step_rad`（目标与实测之差上限，现在 0.08 rad）要和策略的步长对得上，策略每步最多 0.005 rad。确认腕部 DM-J4310 是 V1.1（峰值 7 N·m）还是 V1.2（12.5 N·m），仿真按 6 N·m 训练；实测 PVT 下的阶跃响应，和仿真 PD（kp 200、kd 40）对比。
 

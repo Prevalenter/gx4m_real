@@ -19,7 +19,11 @@ hand-eye result; the env frame comes from the reference robot base pose, not fro
 hand-eye session. Place the plate with
 perception/step1_setup.py first (it uses the same base pose, from config/initial_pose.json).
 
-Tactile: not wired yet (PaXini mapping and calibration pending), the policy sees no contact.
+Tactile: the four PaXini fingertip sensors (gx4m_real.robot.tactile.FingertipContacts, thumb first as the simulation's
+fingertips) are tared at the start of each episode, with the hand open at the start pose, and a tared total normal
+force above --tactile-threshold (default: the trained binary_tactile_threshold_n, 0.3 N) is a contact. The raw
+count is scaled by 0.1 N as in the hora deployment, not calibrated here. --no-tactile feeds zeros (the policies fail
+without contact); a sensor whose reading is older than --max-tactile-age stops the episode.
 
 Safety: every episode starts at the reference initial pose (moved there slowly, after a keypress), the arm
 speed is capped by the PVT velocity limit (default: the trained PhysX limit, 1.5 rad/s; the policy targets move at
@@ -181,12 +185,18 @@ class Rate:
         return late
 
 
-class Step1Runner:
-    """Robot side of the loop; arm is an ArmDriver (motor frame), hand a HandDriver, gear a pose source."""
+class TactileLost(RuntimeError):
+    """A fingertip sensor stopped answering (or the tare failed): the episode stops."""
 
-    def __init__(self, iface, actor, arm, hand, gear, camera, *, arm_speed_scale=None, max_pose_age=1.,
-                 max_tracking_error=.3, approach_speed=.2, hand_approach_speed=1., log=print):
+
+class Step1Runner:
+    """Robot side of the loop; arm is an ArmDriver (motor frame), hand a HandDriver, gear a pose source, tactile a
+    FingertipContacts (None: no contact)."""
+
+    def __init__(self, iface, actor, arm, hand, gear, camera, *, tactile=None, arm_speed_scale=None, max_pose_age=1.,
+                 max_tactile_age=.2, max_tracking_error=.3, approach_speed=.2, hand_approach_speed=1., log=print):
         self.iface, self.actor, self.arm, self.hand, self.gear, self.camera = iface, actor, arm, hand, gear, camera
+        self.tactile, self.max_tactile_age = tactile, max_tactile_age
         self.comp = arm.config.compensation
         self.arm_speed_scale, self.max_pose_age = arm_speed_scale, max_pose_age
         self.max_tracking_error, self.approach_speed, self.log = max_tracking_error, approach_speed, log
@@ -271,6 +281,23 @@ class Step1Runner:
             self.hand.command(self.hand.read())
         return q
 
+    def tare(self):
+        """Zero the fingertip forces; the hand must be open at the start pose, touching nothing."""
+        if self.tactile is not None:
+            try:
+                self.log(f'Tactile tare (N): {np.round(self.tactile.tare(), 2).tolist()}')
+            except RuntimeError as exc:
+                raise TactileLost(exc) from exc
+
+    def contacts(self):
+        """(0/1 contact per fingertip (4,), tared normal force N (4,)); zeros without tactile."""
+        if self.tactile is None:
+            return np.zeros(4), np.zeros(4)
+        try:
+            return self.tactile.contacts(self.max_tactile_age)
+        except RuntimeError as exc:
+            raise TactileLost(exc) from exc
+
     def episode(self, max_steps=None):
         """One policy episode from the start pose; returns (outcome, per-step log)."""
         iface = self.iface
@@ -280,6 +307,7 @@ class Step1Runner:
         self.rate.next = None
         k = 0
         try:
+            self.tare()
             while max_steps is None or k < max_steps:
                 if self.stop_request.is_set():
                     outcome = 'stopped'
@@ -301,29 +329,35 @@ class Step1Runner:
                 if k > 0 and error > self.max_tracking_error:
                     outcome = 'tracking_error'
                     break
-                obs = iface.observation(q, pos, T[:3, 2], np.zeros(4))
+                contact, force = self.contacts()
+                obs = iface.observation(q, pos, T[:3, 2], contact)
                 action = self.actor(obs)
                 targets = iface.apply_action(action, self.arm_speed_scale)
                 self.send(targets)
                 rows.append(dict(t=time.monotonic(), late=late, q=q, object_pos=pos, object_quat=quat, pose_age=age,
-                                 obs=obs, action=action, targets=targets, stage=iface.stage, tracking_error=error))
+                                 contact=contact, tactile_force=force, obs=obs, action=action, targets=targets,
+                                 stage=iface.stage, tracking_error=error))
                 if k % 30 == 0:
                     self.log(f'step {k:4d}: stage {iface.stage}, keypoint error '
                              f'{iface.keypoint_distance(pos, quat)*1000:6.1f} mm, pose age {age*1000:4.0f} ms, '
-                             f'arm lag {error:.3f} rad, late {late*1000:.0f} ms')
+                             f'arm lag {error:.3f} rad, late {late*1000:.0f} ms, '
+                             f'contact {"".join(str(int(c)) for c in contact)}')
                 k += 1
             else:
                 outcome = 'max_steps'
         except KeyboardInterrupt:
             outcome = 'interrupted'
+        except TactileLost as exc:
+            self.log(f'Tactile lost: {exc}')
+            outcome = 'tactile_lost'
         finally:
             self.hold()
         return outcome or 'max_steps', rows
 
 
 def save_episode(path, rows, outcome):
-    keys = ('t', 'late', 'q', 'object_pos', 'object_quat', 'pose_age', 'obs', 'action', 'targets', 'stage',
-            'tracking_error')
+    keys = ('t', 'late', 'q', 'object_pos', 'object_quat', 'pose_age', 'contact', 'tactile_force', 'obs', 'action',
+            'targets', 'stage', 'tracking_error')
     data = {k: np.array([r[k] for r in rows]) for k in keys}
     data['distance'] = np.array([r.get('distance', np.nan) for r in rows])
     np.savez_compressed(path, outcome=outcome, **data)
@@ -357,6 +391,30 @@ def arm_config(path, iface, handeye=None, velocity=None):
     return config
 
 
+def add_tactile_args(parser):
+    parser.add_argument('--no-tactile', action='store_true', help='Feed zero contact (no PaXini sensors)')
+    parser.add_argument('--tactile-threshold', type=float,
+                        help='Tared normal force (N) counted as contact (default: the trained threshold)')
+    parser.add_argument('--max-tactile-age', type=float, default=.2, help='s: an older sensor reading stops the episode')
+
+
+def open_tactile(args, iface):
+    """FingertipContacts of the four PaXini fingertips (thumb first), or None with --mock / --no-tactile."""
+    if args.mock or args.no_tactile:
+        print('WARNING: no tactile, the policy sees no finger contact')
+        return None
+    from gx4m_real.robot.tactile import FingertipContacts
+    threshold = args.tactile_threshold or iface.ref['binary_tactile_threshold_n']
+    tactile = FingertipContacts.open(threshold_n=threshold)
+    try:
+        print(f'PaXini fingertips (thumb, index, middle, ring) now at {np.round(tactile.wait(), 2).tolist()} N, '
+              f'contact above {threshold} N after the tare at each episode start')
+    except Exception:
+        tactile.close()
+        raise
+    return tactile
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--step', type=int, choices=sorted(REFERENCES), default=1)
@@ -377,6 +435,7 @@ def main(argv=None):
     parser.add_argument('--max-pose-age', type=float, default=1.,
                         help='s: tracking lost this long stops the episode (trained with poses up to 0.13 s old)')
     parser.add_argument('--max-tracking-error', type=float, default=.3, help='Arm target - measured, rad')
+    add_tactile_args(parser)
     parser.add_argument('--yes', action='store_true', help='No keypress prompts (mock runs)')
     parser.add_argument('--out', type=Path, help='New directory for logs (default: runs/step<n>_<time>)')
     args = parser.parse_args(argv)
@@ -388,14 +447,16 @@ def main(argv=None):
     actor = load_actor(args.model, iface)
     config = arm_config(args.config, iface, args.handeye, args.arm_velocity)
     mesh_to_object = np.loadtxt(args.mesh_to_object) if args.mesh_to_object else None
-    print('WARNING: tactile is not wired, the policy sees no finger contact')
-    out = args.out or HERE/'runs'/datetime.now().strftime(f'step{args.step}_%Y%m%d_%H%M%S')
+    tactile = open_tactile(args, iface)
+    out =args.out or HERE/'runs'/datetime.now().strftime(f'step{args.step}_%Y%m%d_%H%M%S')
     out.mkdir(parents=True, exist_ok=False)
     (out/'run.json').write_text(json.dumps(dict(
         argv=sys.argv if argv is None else argv, step=args.step, model=str(args.model.resolve()), velocity_limit=config.velocity_limit,
         arm_speed_scale=args.arm_speed_scale or iface.arm_speed_scale, torque_limit=config.torque_limit,
         max_joint_step_rad=config.max_joint_step_rad, handeye=str(args.handeye) if args.handeye else None,
-        mesh_to_object=None if mesh_to_object is None else mesh_to_object.tolist(), tactile=None,
+        mesh_to_object=None if mesh_to_object is None else mesh_to_object.tolist(),
+        tactile=None if tactile is None else dict(threshold_n=tactile.threshold_n, max_age=args.max_tactile_age,
+                                                  newton_per_count=tactile.newton_per_count),
         mock=args.mock), indent=2) + '\n')
 
     ask = (lambda message: None) if args.yes else (lambda message: input(message))
@@ -407,9 +468,9 @@ def main(argv=None):
     else:
         gear = UdpGearPose(args.pose_port, same_host=not args.pose_remote)
         camera = CameraToEnv(args.handeye, iface, mesh_to_object)
-    runner = Step1Runner(iface, actor, arm, hand, gear, camera, arm_speed_scale=args.arm_speed_scale,
-                         max_pose_age=args.max_pose_age, max_tracking_error=args.max_tracking_error,
-                         approach_speed=args.approach_speed)
+    runner = Step1Runner(iface, actor, arm, hand, gear, camera, tactile=tactile, arm_speed_scale=args.arm_speed_scale,
+                         max_pose_age=args.max_pose_age, max_tactile_age=args.max_tactile_age,
+                         max_tracking_error=args.max_tracking_error, approach_speed=args.approach_speed)
     print(f'Arm PVT limit {config.velocity_limit:.2f} rad/s, torque ratio {config.torque_limit}, '
           f'action scale {args.arm_speed_scale or iface.arm_speed_scale} rad/s; logs: {out}')
     outcomes = []
@@ -439,6 +500,8 @@ def main(argv=None):
         runner.hold()
     finally:
         gear.close()
+        if tactile is not None:
+            tactile.close()
         (out/'outcomes.json').write_text(json.dumps(outcomes) + '\n')
         if arm.robot is not None:
             try:

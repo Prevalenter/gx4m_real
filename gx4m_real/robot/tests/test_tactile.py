@@ -1,5 +1,6 @@
 """PaXini L3530 frames against a fake serial port (no hardware)."""
 import struct
+import time
 import unittest
 
 import numpy as np
@@ -86,6 +87,51 @@ class PaXiniTests(unittest.TestCase):
         np.testing.assert_array_equal(sensor.read_total(), [2, -1, 1])
         with self.assertRaisesRegex(RuntimeError, '0x01'):
             sensor.read(0x0000, 16)
+
+
+class FakeTotal:
+    """A sensor whose total normal force is set by the test; fail=True makes reads time out."""
+
+    def __init__(self, normal=0.):
+        self.normal, self.fail, self.closed = normal, False, False
+
+    def read_total(self):
+        if self.fail:
+            raise TimeoutError('No PaXini reply on fake')
+        return np.array([0., 0., self.normal])
+
+    def close(self):
+        self.closed = True
+
+
+class FingertipContactTests(unittest.TestCase):
+    def make(self, normals, **kw):
+        sensors = [FakeTotal(n) for n in normals]
+        contacts = T.FingertipContacts(sensors, period=.001, **kw)
+        self.addCleanup(contacts.close)
+        contacts.wait()
+        return contacts, sensors
+
+    def test_tare_and_threshold(self):
+        contacts, sensors = self.make([5, 2, 0, 9])            # resting offsets in counts (0.1 N each)
+        np.testing.assert_allclose(contacts.tare(duration=.02), [.5, .2, 0., .9])
+        sensors[1].normal, sensors[3].normal = 6, 11             # +0.4 N and +0.2 N
+        time.sleep(.02)
+        contact, force = contacts.contacts()
+        np.testing.assert_array_equal(contact, [0, 1, 0, 0])
+        np.testing.assert_allclose(force, [0., .4, 0., .2], atol=1e-9)
+
+    def test_stale_sensor_raises(self):
+        contacts, sensors = self.make([0, 0, 0, 0])
+        sensors[2].fail = True
+        time.sleep(.06)
+        with self.assertRaisesRegex(RuntimeError, 'sensor 2 .*No PaXini reply'):
+            contacts.contacts(max_age=.05)
+
+    def test_close_closes_the_sensors(self):
+        contacts, sensors = self.make([0, 0])
+        contacts.close()
+        self.assertTrue(all(s.closed for s in sensors))
 
 
 if __name__ == '__main__':

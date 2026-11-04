@@ -8,10 +8,14 @@ third_party/libgx7's TactileSerial speaks an older frame and gets no reply from 
 Registers: 0x040E holds 135 points x (shear x int8, shear y int8, normal uint8), raw relative values without a
 Newton calibration; 0x03F0 holds the total force in the same layout (x, y int8, z uint8), which the hora
 deployment scales by 0.1 N.
+
+FingertipContacts turns the four sensors into the policy's binary fingertip contact (thumb, index, middle, ring,
+the simulation's gx4m_link4 / 8 / 12 / 16(+17) order): total normal force minus a tare above a threshold.
 """
 from __future__ import annotations
 
 import struct
+import threading
 import time
 
 import numpy as np
@@ -143,3 +147,118 @@ class PaXiniL3530:
         """Total force (3,): shear x, y and normal in raw units (0.1 N each as scaled by the hora deployment)."""
         raw = self.read(TOTAL_ADDRESS, 3)
         return np.array([int.from_bytes(raw[i:i + 1], 'little', signed=i < 2) for i in range(3)], dtype=float)
+
+
+class FingertipContacts:
+    """Binary fingertip contact from one sensor per finger, in the given order (FINGERS: thumb first). A thread per
+    sensor polls its total-force register every period s; contacts() uses each sensor's newest reading. The
+    normal force is newton_per_count * raw count (hora's scale, not calibrated here) minus the tare."""
+
+    def __init__(self, sensors, *, threshold_n=.3, newton_per_count=.1, period=.005):
+        self.sensors = list(sensors)
+        self.threshold_n, self.newton_per_count, self.period = threshold_n, newton_per_count, period
+        n = len(self.sensors)
+        self.latest, self.errors, self.offset = [None]*n, [None]*n, np.zeros(n)
+        self.lock, self.running = threading.Lock(), True
+        self.threads = [threading.Thread(target=self._poll, args=(i,), daemon=True, name=f'paxini-{i}')
+                        for i in range(n)]
+        for thread in self.threads:
+            thread.start()
+
+    @classmethod
+    def open(cls, serial_numbers=tuple(FINGERS), **kwargs):
+        """The sensors of serial_numbers (default: the four fingertips, thumb first), each on its own port."""
+        ports = find_ports(serial_numbers)
+        sensors = []
+        try:
+            for serial_number in serial_numbers:
+                sensors.append(PaXiniL3530(ports[serial_number]))
+        except Exception:
+            for sensor in sensors:
+                sensor.close()
+            raise
+        return cls(sensors, **kwargs)
+
+    def _poll(self, i):
+        sensor = self.sensors[i]
+        while self.running:
+            try:
+                normal = float(sensor.read_total()[2])
+                with self.lock:
+                    self.latest[i], self.errors[i] = (time.monotonic(), normal), None
+            except Exception as exc:        # timeouts, bad frames: keep polling; normals() reports the age
+                with self.lock:
+                    self.errors[i] = exc
+            time.sleep(self.period)
+
+    def normals(self, max_age=.2):
+        """Newest normal force per sensor (N, before the tare); RuntimeError if one is older than max_age s."""
+        now = time.monotonic()
+        with self.lock:
+            latest, errors = list(self.latest), list(self.errors)
+        stale = [i for i, reading in enumerate(latest) if reading is None or now - reading[0] > max_age]
+        if stale:
+            raise RuntimeError('PaXini reading too old: ' + ', '.join(
+                f'sensor {i} ({errors[i] or "no reading"})' for i in stale))
+        return self.newton_per_count*np.array([reading[1] for reading in latest])
+
+    def wait(self, timeout=2.):
+        """Block until every sensor has a reading; RuntimeError after timeout s."""
+        end = time.monotonic() + timeout
+        while True:
+            try:
+                return self.normals()
+            except RuntimeError:
+                if time.monotonic() > end:
+                    raise
+                time.sleep(self.period)
+
+    def tare(self, duration=.2):
+        """Mean normal force over duration s becomes each sensor's zero: call with the fingers touching nothing."""
+        samples, end = [self.wait()], time.monotonic() + duration
+        while time.monotonic() < end:
+            time.sleep(self.period)
+            samples.append(self.normals())
+        self.offset = np.mean(samples, axis=0)
+        return self.offset
+
+    def forces(self, max_age=.2):
+        return self.normals(max_age) - self.offset
+
+    def contacts(self, max_age=.2):
+        """(0/1 contact per sensor, tared normal force N)."""
+        forces = self.forces(max_age)
+        return (forces > self.threshold_n).astype(np.float64), forces
+
+    def close(self):
+        self.running = False
+        for thread in self.threads:
+            thread.join(timeout=1.)
+        for sensor in self.sensors:
+            sensor.close()
+
+
+def main(argv=None):
+    """Live check of the fingertip mapping and threshold: press one finger at a time."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description='PaXini fingertip contacts (thumb, index, middle, ring), tared at start')
+    parser.add_argument('--threshold', type=float, default=.3, help='Contact above this tared normal force, N')
+    parser.add_argument('--hz', type=float, default=10.)
+    args = parser.parse_args(argv)
+    contacts = FingertipContacts.open(threshold_n=args.threshold)
+    try:
+        print('Tare (N), touch nothing:', np.round(contacts.tare(duration=1.), 2).tolist())
+        names = list(FINGERS.values())
+        while True:
+            contact, force = contacts.contacts()
+            print('  '.join(f'{n} {f:+5.1f} N {"#" if c else "."}' for n, f, c in zip(names, force, contact)), flush=True)
+            time.sleep(1./args.hz)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        contacts.close()
+
+
+if __name__ == '__main__':
+    main()

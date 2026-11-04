@@ -42,8 +42,8 @@ from gx4m_real.camera.frame_ipc import receive, send            # noqa: E402
 from gx4m_real.robot.arm import ArmDriver                       # noqa: E402
 from gx4m_real.robot.hand import HandDriver                     # noqa: E402
 from tasks.dexlong_gear3.run_step1 import (CONTROL_CONFIG, HAND_START_TOLERANCE, START_RANGE,  # noqa: E402
-                                           CameraToEnv, Step1Runner, UdpGearPose, arm_config, load_actor,
-                                           save_episode)
+                                           CameraToEnv, Step1Runner, UdpGearPose, add_tactile_args, arm_config,
+                                           load_actor, open_tactile, save_episode)
 from tasks.dexlong_gear3.step1 import MODELS, REFERENCES, Step1Interface, load_reference  # noqa: E402
 
 # Same expression in perception/robot_panel.py (other environment, no shared import).
@@ -53,7 +53,7 @@ ACTIONS = {'connect_arm': '连接机械臂', 'disconnect_arm': '断开机械臂'
            'arm_home': '机械臂回初始位置', 'hand_home': '灵巧手回初始位置', 'run_policy': '执行策略', 'stop': '停止'}
 START_POSE_AGE = .3     # s: the policy starts only on a pose this fresh; once running, --max-pose-age applies
 OUTCOMES = {'success': '成功', 'stopped': '已停止', 'pose_lost': '齿轮位姿丢失', 'tracking_error': '机械臂跟不上目标',
-            'max_steps': '达到最大步数', 'interrupted': '中断'}
+            'max_steps': '达到最大步数', 'interrupted': '中断', 'tactile_lost': '触觉读数中断'}
 
 
 class RobotController:
@@ -203,7 +203,13 @@ class RobotController:
             q.update(zip(names[7:], np.asarray(hand.q, float).tolist()))
         with self.lock:
             busy, message = self.busy, self.message
-        return {'type': 'status', 'busy': busy, 'message': message, 'q': q,
+        tactile = None
+        if self.runner.tactile is not None:
+            try:
+                tactile = np.round(self.runner.tactile.forces(), 2).tolist()   # N after the last tare, thumb first
+            except RuntimeError as exc:
+                tactile = str(exc)
+        return {'type': 'status', 'busy': busy, 'message': message, 'q': q, 'tactile': tactile,
                 'arm': {'connected': arm['connected'], 'mode': arm['mode'], 'error': arm['error'], 'mock': arm['mock']},
                 'hand': {'connected': hand is not None, 'error': self.hand_error},
                 'stage': self.iface.stage if busy == 'run_policy' else None,
@@ -272,6 +278,7 @@ def main(argv=None):
     parser.add_argument('--max-pose-age', type=float, default=1.,
                         help='s: tracking lost this long stops the policy (a start needs a pose under 0.3 s)')
     parser.add_argument('--max-tracking-error', type=float, default=.3)
+    add_tactile_args(parser)
     parser.add_argument('--out', type=Path, help='Directory for episode logs (default: runs/step<n>_<time>)')
     args = parser.parse_args(argv)
     if not args.mock and args.handeye is None:
@@ -283,9 +290,11 @@ def main(argv=None):
     arm = ArmDriver(config, mock=args.mock)
     gear = UdpGearPose(args.pose_port)
     camera = CameraToEnv(args.handeye, iface) if args.handeye else CameraToEnv()
-    runner = Step1Runner(iface, actor, arm, None, gear, camera, arm_speed_scale=args.arm_speed_scale,
-                         max_pose_age=args.max_pose_age, max_tracking_error=args.max_tracking_error,
-                         approach_speed=args.approach_speed, hand_approach_speed=args.hand_approach_speed)
+    tactile = open_tactile(args, iface)
+    runner = Step1Runner(iface, actor, arm, None, gear, camera, tactile=tactile, arm_speed_scale=args.arm_speed_scale,
+                         max_pose_age=args.max_pose_age, max_tactile_age=args.max_tactile_age,
+                         max_tracking_error=args.max_tracking_error, approach_speed=args.approach_speed,
+                         hand_approach_speed=args.hand_approach_speed)
     out = args.out or HERE/'runs'/datetime.now().strftime(f'step{args.step}_%Y%m%d_%H%M%S')
     controller = RobotController(
         runner, lambda: HandDriver(args.hand_port, serial_number=args.hand_serial, mock=args.mock), out)
@@ -301,6 +310,8 @@ def main(argv=None):
         controller.close()
         KEY_PATH.unlink(missing_ok=True)
         gear.close()
+        if tactile is not None:
+            tactile.close()
         if arm.robot is not None:
             try:
                 if arm.mode != 'fault':

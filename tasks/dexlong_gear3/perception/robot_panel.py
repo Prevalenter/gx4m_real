@@ -59,6 +59,12 @@ def status_markdown(status):
     lines = [f'**机械臂**：{arm_text}', f'**灵巧手**：{hand_text}', f"**状态**：{status['message']}"]
     if status.get('stage') is not None:
         lines.append(f"**策略阶段**：{status['stage']}")
+    tactile = status.get('tactile')
+    if isinstance(tactile, str):
+        lines.append(f'**触觉**：读取失败：{tactile}')
+    elif tactile is not None:
+        names = ('拇指', '食指', '中指', '无名指')
+        lines.append('**触觉**（去皮后法向力）：' + '，'.join(f'{n} {f:+.1f} N' for n, f in zip(names, tactile)))
     lines.append(f'关节补偿（与手眼标定一致）：{offsets or "全为 0"}')
     if arm['connected'] or hand['connected']:
         lines.append('模型显示真机实时关节。')

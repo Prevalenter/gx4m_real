@@ -22,4 +22,4 @@ joints:
     offset_deg: -6.731
   joint7:
     direction: -1
-    offset_deg: 0.0
+    offset_deg: 15.0

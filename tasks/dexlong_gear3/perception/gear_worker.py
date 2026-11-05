@@ -33,6 +33,8 @@ def main(argv=None):
     parser.add_argument('--track-iterations', type=int, default=2)
     parser.add_argument('--min-iou', type=float, default=.45)
     parser.add_argument('--max-depth-error', type=float, default=.02, help='Median depth residual in metres')
+    parser.add_argument('--up-in-camera', type=float, nargs=3,
+                        help='World +z in the camera frame: registrations are kept hub up (default: unconstrained)')
     args = parser.parse_args(argv)
     port, key = int(os.environ['GEAR_WORKER_PORT']), bytes.fromhex(os.environ['GEAR_WORKER_AUTHKEY'])
     ranges = hsv_ranges(args.gear, args.hsv_low, args.hsv_high)
@@ -55,7 +57,8 @@ def main(argv=None):
         tracker = GearTracker(mesh, yaw_symmetry(args.gear), ranges, scorer=ScorePredictor(),
                               refiner=PoseRefinePredictor(), glctx=dr.RasterizeCudaContext(), debug_dir=debug_dir,
                               register_iterations=args.register_iterations, track_iterations=args.track_iterations,
-                              min_iou=args.min_iou, max_depth_error=args.max_depth_error)
+                              min_iou=args.min_iou, max_depth_error=args.max_depth_error,
+                              up_in_camera=args.up_in_camera)
         # Listen only once the models are loaded: until then the parent's connection attempts are refused.
         with Listener(('127.0.0.1', port), authkey=key) as listener, listener.accept() as connection:
             send(connection, {'type': 'ready', 'gear': args.gear})

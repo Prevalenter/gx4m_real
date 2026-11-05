@@ -328,8 +328,9 @@ def main(argv=None):
                 from publish_gear_pose import UdpPosePublisher
                 host, port = args.target.rsplit(':', 1)
                 observers.append(UdpPosePublisher(host, int(port)))
+            up_in_camera = viewer.T_world_cam[:3, :3].T @ [0., 0., 1.]     # gears lie hub up (gear_tracker.hub_up)
             detect_live(['--gear', gear, '--no-display', *inference_args], observer=Observers(*observers),
-                        frame_hook=plate_frame_hook(viewer, reference))
+                        frame_hook=plate_frame_hook(viewer, reference), up_in_camera=up_in_camera)
     except KeyboardInterrupt:
         pass
     finally:

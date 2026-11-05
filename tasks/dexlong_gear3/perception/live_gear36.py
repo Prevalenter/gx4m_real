@@ -28,8 +28,9 @@ def label(image, lines, good):
                     .5, (80, 255, 80) if good else (0, 210, 255), 1, cv2.LINE_AA)
 
 
-def main(argv=None, observer=None, frame_hook=None):
-    """frame_hook(scorer, refiner, glctx, output) returns a callable run on each frame after its gear pose is sent."""
+def main(argv=None, observer=None, frame_hook=None, up_in_camera=None):
+    """frame_hook(scorer, refiner, glctx, output) returns a callable run on each frame after its gear pose is sent.
+    up_in_camera (world +z in the camera frame) keeps registrations hub up (gear_tracker.hub_up)."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--gpu', default='0')
     parser.add_argument('--device-index', type=int, default=0)
@@ -75,7 +76,7 @@ def main(argv=None, observer=None, frame_hook=None):
     tracker = GearTracker(mesh, symmetry, ranges, scorer=scorer, refiner=refiner, glctx=glctx,
                           debug_dir=output / 'debug', register_iterations=args.register_iterations,
                           track_iterations=args.track_iterations, min_iou=args.min_iou,
-                          max_depth_error=args.max_depth_error)
+                          max_depth_error=args.max_depth_error, up_in_camera=up_in_camera)
     writer = None
     frame_count = accepted = registrations = tracks = 0
     durations = deque(maxlen=30)

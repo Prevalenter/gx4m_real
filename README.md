@@ -218,7 +218,7 @@ python tasks/dexlong_gear3/run_step1.py --step 2 --handeye apps/charuco_handeye/
 - PVT 速度上限（`--arm-velocity`）默认 1.5 rad/s，就是训练时 PhysX 的关节速度上限，不用 `apps/control/config.yaml` 里示教用的 0.25。策略目标本身最多 0.15 rad/s。力矩比例、`max_joint_step_rad` 和 CAN 参数仍读这个配置文件。
 - `--arm-speed-scale` 可以降低策略每步的手臂速度，首次上机建议先降速。
 - 感知跟丢的帧不会立即停止策略：继续用最后一个有效位姿，它超过 `--max-pose-age`（默认 1 s；训练里的位姿延迟只到 0.13 s，丢失期间策略看到的是旧位姿）还没更新时才停止。Viser 按钮启动策略时仍要求位姿不超过 0.3 s。手臂目标与实测之差超过 `--max-tracking-error`（默认 0.3 rad）时立即停止。两种情况都保持当前姿态；Ctrl-C 也一样。
-- 手挡在相机和齿轮之间时，`perception/gear_tracker.py` 把比渲染齿轮近 1 cm 以上的像素当作遮挡：它们不计入轮廓 IoU 和深度残差（至少 25% 的轮廓要可见，记录在 `frames.jsonl` 的 `visible_fraction`），跟踪时也从 FoundationPose 的深度输入里去掉，避免手把位姿拉向相机。抓起后齿轮被大部分包住时仍会跟丢，那时需要用手的运动学推算位姿（尚未实现）。
+- 手挡在相机和齿轮之间时，`perception/gear_tracker.py` 把比渲染齿轮近 1 cm 以上的像素当作遮挡：它们不计入轮廓 IoU 和深度残差（至少 25% 的轮廓要可见，记录在 `frames.jsonl` 的 `visible_fraction`），跟踪时也从 FoundationPose 的深度输入里去掉，避免手把位姿拉向相机。配准结果的轮毂朝下时会翻转成朝上（gear48 上下几乎对称，否则会随机识别成倒扣的，见 `perception/README.md` 的“轮毂朝上”）。抓起后齿轮被大部分包住时仍会跟丢，那时需要用手的运动学推算位姿（尚未实现）。
 
 日志在 `tasks/dexlong_gear3/runs/step1_<时间>/`：`run.json` 是参数，`episode_XXX.npz` 记录每步的观测、动作、目标、关节、齿轮位姿、位姿延迟、阶段、关键点距离和时序。
 

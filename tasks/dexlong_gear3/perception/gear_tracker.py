@@ -8,6 +8,7 @@ from detect_gear36 import color_gear_mask
 
 OCCLUSION_MARGIN = .01      # m: observed depth this much nearer than the rendered gear is something in front of it
 OCCLUSION_RING_PX = 15      # around the silhouette, pixels nearer than the gear's nearest point are occluders too
+FLIP = np.diag([1., -1., -1., 1.])  # 180 deg about the mesh x axis: the disc (z -4..4 mm) onto itself, the hub over
 
 
 def occluders(depth, rendered, margin=OCCLUSION_MARGIN, ring_px=OCCLUSION_RING_PX):
@@ -22,6 +23,14 @@ def occluders(depth, rendered, margin=OCCLUSION_MARGIN, ring_px=OCCLUSION_RING_P
     ring = cv2.dilate(silhouette.astype(np.uint8), np.ones((size, size), np.uint8)).astype(bool) & ~silhouette
     valid = depth > 0
     return (silhouette & valid & (depth < rendered - margin)) | (ring & valid & (depth < rendered[silhouette].min() - margin))
+
+
+def hub_up(pose, up_in_camera):
+    """pose, or pose turned over (FLIP) when its mesh +z (the hub side) points against up_in_camera (world up in
+    the camera frame). The turned-over pose covers the same disc; only the hub moves to the other side."""
+    if up_in_camera is None or pose[:3, 2] @ np.asarray(up_in_camera, float) >= 0:
+        return pose
+    return pose @ FLIP
 
 
 def visible_iou(silhouette, mask, occluded):
@@ -39,10 +48,16 @@ class GearTracker:
     Occlusion (the hand between camera and gear): pixels nearer than the gear rendered at the pose are left out of
     the IoU and the depth residual, as long as at least min_visible of the silhouette stays visible, and while
     tracking, the pixels in front of the last accepted pose are removed from the depth FoundationPose refines on,
-    so the hand does not pull the pose toward the camera."""
+    so the hand does not pull the pose toward the camera.
+
+    Upside down: the gear disc is symmetric about its mid-plane and the hub is a small part of the gear (4% of the
+    gear48 disc), so a registration with the hub pointing into the table renders and scores almost like the right
+    one. With up_in_camera (world +z in the camera frame) a registration whose hub points down is turned over
+    (hub_up) before it is checked and tracked; tracking only refines and does not turn the gear over again."""
 
     def __init__(self, mesh, symmetry, ranges, *, scorer, refiner, glctx, debug_dir,
-                 register_iterations=5, track_iterations=2, min_iou=.45, max_depth_error=.02, min_visible=.25):
+                 register_iterations=5, track_iterations=2, min_iou=.45, max_depth_error=.02, min_visible=.25,
+                 up_in_camera=None):
         import torch
         from estimater import FoundationPose
         from Utils import draw_posed_3d_box, draw_xyz_axis, nvdiffrast_render
@@ -53,6 +68,8 @@ class GearTracker:
         self.scorer, self.refiner, self.glctx, self.debug_dir = scorer, refiner, glctx, str(debug_dir)
         self.register_iterations, self.track_iterations = register_iterations, track_iterations
         self.min_iou, self.max_depth_error, self.min_visible = min_iou, max_depth_error, min_visible
+        self.up_in_camera = None if up_in_camera is None else np.asarray(up_in_camera, float)
+        self.flips = 0              # registrations turned over by hub_up
         self.estimator = None
         self.bad_frames = 0
         self.last_render = None     # rendered depth at the last accepted pose
@@ -75,6 +92,19 @@ class GearTracker:
             self.reset()
             return None
 
+    def keep_hub_up(self, estimator, pose):
+        """hub_up for a registered pose; a turned-over pose also replaces the estimator's pose_last (the centered
+        mesh pose that track_one refines from)."""
+        upright = hub_up(pose, self.up_in_camera)
+        if upright is pose:
+            return pose
+        to_centered = estimator.get_tf_to_centered_mesh().cpu().numpy()
+        last = estimator.pose_last
+        estimator.pose_last = self.torch.as_tensor(upright @ np.linalg.inv(to_centered), dtype=last.dtype,
+                                                   device=last.device)
+        self.flips += 1
+        return upright
+
     def step(self, frame, mask):
         """(pose or None, metrics, mode, overlay RGB or None) for a frame with rgb, depth (m) and K."""
         metrics = {'status': 'SEARCHING', 'mask_iou': None, 'median_depth_error_m': None, 'visible_fraction': None}
@@ -95,6 +125,8 @@ class GearTracker:
             mode = 'REGISTER'
             if estimator.pose_last is None:
                 pose = None
+            else:
+                pose = self.keep_hub_up(estimator, pose)
         else:
             depth = frame.depth
             if self.last_render is not None and self.last_render.shape == depth.shape:

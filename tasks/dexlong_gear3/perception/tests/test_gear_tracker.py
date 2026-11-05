@@ -1,4 +1,4 @@
-"""Occlusion handling of gear_tracker.py on synthetic depth images (no GPU)."""
+"""Occlusion handling and the hub-up turn-over of gear_tracker.py on synthetic data (no GPU)."""
 from pathlib import Path
 import sys
 import unittest
@@ -7,7 +7,7 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HERE))
-from gear_tracker import occluders, visible_iou                        # noqa: E402
+from gear_tracker import FLIP, GearTracker, hub_up, occluders, visible_iou  # noqa: E402
 
 
 def scene():
@@ -51,6 +51,68 @@ class OcclusionTests(unittest.TestCase):
         iou, visible = visible_iou(shifted > 0, disc, occluders(depth, shifted))
         self.assertLess(iou, .45)
         self.assertEqual(visible, 1.)
+
+
+def rotation(axis, angle):
+    from scipy.spatial.transform import Rotation
+    T = np.eye(4)
+    T[:3, :3] = Rotation.from_rotvec(np.asarray(axis, float)*angle).as_matrix()
+    return T
+
+
+class HubUpTests(unittest.TestCase):
+    UP = np.array([0., -.5, -np.sqrt(.75)])           # world up seen by a camera looking down at 60 deg
+
+    def gear(self, up):
+        """A gear 0.4 m in front of the camera, hub along +UP (up) or -UP, turned 10 deg about its axis."""
+        z = self.UP if up else -self.UP
+        x = np.cross([1., 0., 0.], z)
+        x /= np.linalg.norm(x)
+        T = np.eye(4)
+        T[:3, :3] = np.c_[x, np.cross(z, x), z]
+        T[:3, 3] = [.02, -.01, .4]
+        return T @ rotation([0, 0, 1], np.radians(10))
+
+    def test_down_is_turned_over_in_place(self):
+        down = self.gear(False)
+        up = hub_up(down, self.UP)
+        self.assertGreater(up[:3, 2] @ self.UP, .99)
+        np.testing.assert_allclose(up[:3, 3], down[:3, 3])                 # disc centre stays
+        np.testing.assert_allclose(np.abs(up[:3, 0] @ down[:3, 0]), 1.)   # same disc, only the hub side changes
+        np.testing.assert_allclose(np.linalg.det(up[:3, :3]), 1.)
+
+    def test_up_and_unconstrained_are_kept(self):
+        up = self.gear(True)
+        self.assertIs(hub_up(up, self.UP), up)
+        down = self.gear(False)
+        self.assertIs(hub_up(down, None), down)
+        tilted = up @ rotation([1, 0, 0], np.radians(80))                 # tilted in the hand, still hub up
+        self.assertIs(hub_up(tilted, self.UP), tilted)
+
+    def test_tracker_replaces_the_estimators_start_pose(self):
+        import torch
+
+        class Estimator:
+            center = np.eye(4)
+            center[:3, 3] = [-.001, .002, -.015]         # tf_to_centered: a translation to the mesh's centre
+
+            def get_tf_to_centered_mesh(self):
+                return torch.as_tensor(self.center)
+
+        estimator, down = Estimator(), self.gear(False)
+        estimator.pose_last = torch.as_tensor(down @ np.linalg.inv(Estimator.center), dtype=torch.float32)
+        tracker = GearTracker.__new__(GearTracker)
+        tracker.torch, tracker.up_in_camera, tracker.flips = torch, self.UP, 0
+        pose = tracker.keep_hub_up(estimator, down)
+        np.testing.assert_allclose(pose, down @ FLIP)
+        self.assertEqual(tracker.flips, 1)
+        self.assertEqual(estimator.pose_last.dtype, torch.float32)
+        # track_one starts from pose_last and returns pose_last @ tf_to_centered: the turned-over pose.
+        np.testing.assert_allclose(estimator.pose_last.numpy() @ Estimator.center, pose, atol=1e-6)
+        before = estimator.pose_last
+        self.assertIs(tracker.keep_hub_up(estimator, pose), pose)          # already hub up: nothing changes
+        self.assertIs(estimator.pose_last, before)
+        self.assertEqual(tracker.flips, 1)
 
 
 if __name__ == '__main__':

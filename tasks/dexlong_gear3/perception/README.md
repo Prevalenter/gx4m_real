@@ -128,6 +128,11 @@ bash tasks/dexlong_gear3/perception/run_live.sh --gpu 0
 
 每帧的掩码、配准/跟踪和有效性检查在 `gear_tracker.py` 的 `GearTracker` 里，`live_gear36.py` 和 `gear_worker.py` 共用。`gear_worker.py`（`run_gear_worker.sh`）不打开相机：由别的进程（`apps/charuco_handeye/view_result.py --live --gear24`，它在 `gear3_control` 环境里同时读相机和关节）启动，经本机连接接收 RGB-D 帧、返回相机坐标系下的齿轮位姿；消息格式见 `gx4m_real/camera/frame_ipc.py`，不用 pickle，两端的 numpy 版本可以不同。
 
+**轮毂朝上**（2026-11-05）：齿轮盘面关于中面对称，轮毂只占盘面的一小部分（gear48 约 4%）。轮毂朝下插进桌面的位姿，渲染出来和正确的几乎一样，FoundationPose 的打分和上面的 IoU、深度检查都分不出来，配准会随机落到上下两种解。实测 gear48 两种解都能通过检查：同一帧正放的 IoU 0.963、翻转的 0.866，深度残差都是 0.9 mm。
+- 给 `GearTracker` 传 `up_in_camera`（世界 +z 在相机坐标系里的方向）后，配准结果的齿轮轴（网格 +z，轮毂一侧）如果朝下，就绕网格 x 轴转 180°（`hub_up`），再做检查。盘面位置不变，只是轮毂换到上面。这个结果同时写回 FoundationPose 的 `pose_last`，之后的跟踪从这里开始，不会再翻回去。
+- `step1_setup.py`（摆放检查和 step1/step2 部署页面）用标定和基座算出这个方向，自动启用。`gear_worker.py` 没有标定，要用 `--up-in-camera x y z` 显式传入，不传则不约束。`live_gear36.py` 单独运行时也不约束。
+- 前提是齿轮不会被翻过 90°：放在桌上时轮毂朝上，在手里只会倾斜。
+
 ## Viser：机器人、固定相机与零件位姿
 
 新增 `viser_scene.py` / `run_viser.sh`，可同时显示 GX7 + GX4M 模型、固定相机坐标轴与视锥、检测到的 gear36 模型及其坐标轴。浏览器默认地址为 **http://127.0.0.1:8088**。

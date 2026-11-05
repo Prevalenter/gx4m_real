@@ -1,6 +1,6 @@
 {
  "task": "gear3_split_step2",
- "checkpoint": "E:\\work\\gx4max\\gx4m_learning\\logs\\rsl_rl\\gx4m_dexlong_gear3_split_step2\\2026-11-04_04-18-41\\model_4000.pt",
+ "checkpoint": "E:\\work\\gx4max\\gx4m_learning\\logs\\rsl_rl\\gx4m_dexlong_gear3_split_step2\\2026-11-05_11-37-02\\model_1500.pt",
  "joint_order": [
   "joint1",
   "joint2",
@@ -329,7 +329,11 @@
   "gx4m_link16",
   "gx4m_link8",
   "gx4m_link12",
-  "gx4m_link17"
+  "gx4m_link4_pad",
+  "gx4m_link17",
+  "gx4m_link8_pad",
+  "gx4m_link12_pad",
+  "gx4m_link17_pad"
  ],
  "initial_joint_pos": [
   0.5619960427284241,
@@ -358,14 +362,14 @@
  ],
  "base_pos": [
   0.11963004618883133,
-  -0.3106570839881897,
-  0.8868435621261597
+  -0.33365708589553833,
+  0.8858435750007629
  ],
  "base_quat": [
-  0.7071067094802856,
-  -0.0002282628556713462,
-  -0.00022826125496067107,
-  -0.7071067094802856
+  0.7068175673484802,
+  0.020222142338752747,
+  0.020222142338752747,
+  -0.7068175673484802
  ],
  "object_pos": [
   0.16500000655651093,
@@ -492,15 +496,23 @@
  ],
  "fingertip_contact_bodies": [
   "gx4m_link4",
+  "gx4m_link4_pad",
   "gx4m_link8",
+  "gx4m_link8_pad",
   "gx4m_link12",
+  "gx4m_link12_pad",
   "gx4m_link16",
-  "gx4m_link17"
+  "gx4m_link17",
+  "gx4m_link17_pad"
  ],
  "fingertip_contact_fingers": [
   0,
+  0,
+  1,
   1,
   2,
+  2,
+  3,
   3,
   3
  ],
@@ -565,7 +577,8 @@
   "object_pos_rel_palm": 3,
   "object_pos_rel_goal": 3,
   "object_axis": 3,
-  "fingertip_object_contact": 4
+  "fingertip_object_contact": 4,
+  "object_pose_std": 2
  },
  "align_reward": {
   "scale": 2.0,
@@ -632,7 +645,7 @@
  ],
  "static_friction": 1.0,
  "dynamic_friction": 1.0,
- "robot_urdf": "E:\\work\\gx4max\\gx4m_learning\\asset\\gx7_right\\urdf\\gx7_right_gx4m_cam_xl330.urdf",
+ "robot_urdf": "E:\\work\\gx4max\\gx4m_learning\\asset\\gx7_right\\urdf\\gx7_right_gx4m_cam_xl330_pad.urdf",
  "arm_object_filtered_links": [
   "base_link",
   "Link1",
@@ -643,5 +656,26 @@
   "Link6",
   "Link7"
  ],
- "clamp_abs_observations": 10.0
+ "clamp_abs_observations": 10.0,
+ "pose_estimator": {
+  "inputs": {
+   "joint_pos": 23,
+   "prev_action_targets": 23,
+   "palm_rot": 4,
+   "fingertips_in_palm": 12,
+   "tracked_pos_in_palm": 3,
+   "tracked_axis_in_palm": 3,
+   "tracked_valid": 1,
+   "tracked_age": 1,
+   "pad_force": 12
+  },
+  "hidden": 256,
+  "file": "estimator.pt",
+  "position_scale": 10.0,
+  "tactile_force_scale": 5.0,
+  "max_age_s": 3.0,
+  "min_visible": 0.65,
+  "reacquire_steps": 3,
+  "pad_force_axes": "per finger (normal into the pad, distal shear, lateral shear) in the fingertip link frame"
+ }
 }

@@ -44,7 +44,7 @@ from gx4m_real.robot.hand import HandDriver                     # noqa: E402
 from tasks.dexlong_gear3.run_step1 import (CONTROL_CONFIG, HAND_START_TOLERANCE, START_RANGE,  # noqa: E402
                                            CameraToEnv, Step1Runner, UdpGearPose, add_tactile_args, arm_config,
                                            load_actor, open_tactile, save_episode)
-from tasks.dexlong_gear3.step1 import MODELS, REFERENCES, Step1Interface, load_reference  # noqa: E402
+from tasks.dexlong_gear3.step1 import ESTIMATORS, MODELS, REFERENCES, Step1Interface, load_reference  # noqa: E402
 
 # Same expression in perception/robot_panel.py (other environment, no shared import).
 KEY_PATH = Path(os.environ.get('XDG_RUNTIME_DIR') or tempfile.gettempdir())/'gx4m_step1_robot.key'
@@ -284,7 +284,7 @@ def main(argv=None):
     if not args.mock and args.handeye is None:
         parser.error('--handeye is required on the real robot')
 
-    iface = Step1Interface(load_reference(REFERENCES[args.step]))
+    iface = Step1Interface(load_reference(REFERENCES[args.step]), estimator=ESTIMATORS.get(args.step))
     actor = load_actor(args.model or MODELS[args.step], iface)
     config = arm_config(args.config, iface, args.handeye, args.arm_velocity)
     arm = ArmDriver(config, mock=args.mock)

@@ -59,7 +59,7 @@ from gx4m_real.robot.compensation import JointCompensation      # noqa: E402
 from gx4m_real.robot.config import load_config                  # noqa: E402
 from gx4m_real.robot.hand import HandDriver                     # noqa: E402
 from gx4m_real.robot.kinematics import matrix_quat, quat_matrix  # noqa: E402
-from tasks.dexlong_gear3.step1 import MODELS, REFERENCES, Step1Interface, load_reference  # noqa: E402
+from tasks.dexlong_gear3.step1 import ESTIMATORS, MODELS, REFERENCES, Step1Interface, load_reference  # noqa: E402
 
 MODEL = MODELS[1]
 CONTROL_CONFIG = ROOT/'apps'/'control'/'config.yaml'
@@ -194,11 +194,15 @@ class Step1Runner:
     FingertipContacts (None: no contact)."""
 
     def __init__(self, iface, actor, arm, hand, gear, camera, *, tactile=None, arm_speed_scale=None, max_pose_age=1.,
-                 max_tactile_age=.2, max_tracking_error=.3, approach_speed=.2, hand_approach_speed=1., log=print):
+                 max_tactile_age=.2, max_tracking_error=.3, approach_speed=.2, hand_approach_speed=1., valid_pose_age=.1,
+                 max_lost_age=10., log=print):
+        """With the pose estimator (iface.estimator): a gear pose up to valid_pose_age s old counts as tracked; an older
+        one is held and flagged, as in training, and the episode stops only once it is max_lost_age s old."""
         self.iface, self.actor, self.arm, self.hand, self.gear, self.camera = iface, actor, arm, hand, gear, camera
         self.tactile, self.max_tactile_age = tactile, max_tactile_age
         self.comp = arm.config.compensation
         self.arm_speed_scale, self.max_pose_age = arm_speed_scale, max_pose_age
+        self.valid_pose_age, self.max_lost_age = valid_pose_age, max_lost_age
         self.max_tracking_error, self.approach_speed, self.log = max_tracking_error, approach_speed, log
         self.hand_approach_speed = hand_approach_speed     # hand_to_start alone; the trained finger limit is 3 rad/s
         self.rate = Rate(1./iface.dt)
@@ -219,8 +223,11 @@ class Step1Runner:
             self.hand.command(self.hand.read())
 
     def gear_pose(self, q):
+        """(gear pose in the env frame, age s); None once older than the allowed age. With the pose estimator the
+        last tracked pose is kept for max_lost_age s (the fixed camera's pose does not depend on q)."""
         T_cam, age = self.gear.get()
-        if T_cam is None or age > self.max_pose_age:
+        limit = self.max_lost_age if self.iface.estimator is not None else self.max_pose_age
+        if T_cam is None or age > limit:
             return None, age
         return self.camera(T_cam, q), age
 
@@ -298,6 +305,15 @@ class Step1Runner:
         except RuntimeError as exc:
             raise TactileLost(exc) from exc
 
+    def pad_forces(self):
+        """Tared pad forces (4, 3) N as (normal, distal, lateral); zeros without tactile."""
+        if self.tactile is None:
+            return np.zeros((4, 3))
+        try:
+            return self.tactile.pad_forces(self.max_tactile_age)
+        except RuntimeError as exc:
+            raise TactileLost(exc) from exc
+
     def episode(self, max_steps=None):
         """One policy episode from the start pose; returns (outcome, per-step log)."""
         iface = self.iface
@@ -319,8 +335,12 @@ class Step1Runner:
                     outcome = 'pose_lost'
                     break
                 pos, quat = T[:3, 3], matrix_quat(T[:3, :3])
+                valid = age <= self.valid_pose_age
+                stage_pos, stage_quat = pos, quat
+                if iface.estimator is not None and not valid and iface.estimated_pose() is not None:
+                    stage_pos, stage_quat = iface.estimated_pose()     # the camera has lost the gear: the estimate
                 if k > 0:
-                    result = iface.update(q, pos, quat)
+                    result = iface.update(q, stage_pos, stage_quat)
                     rows[-1].update(stage_after=result['stage'], distance=result['distance'], away=result['away'])
                     if result['outcome']:
                         outcome = result['outcome']
@@ -330,13 +350,20 @@ class Step1Runner:
                     outcome = 'tracking_error'
                     break
                 contact, force = self.contacts()
-                obs = iface.observation(q, pos, T[:3, 2], contact)
+                pad = None
+                if iface.estimator is not None:
+                    pad = self.pad_forces()
+                    contact = (pad[:, 0] > iface.ref['binary_tactile_threshold_n']).astype(np.float64)
+                obs = iface.observation(q, pos, T[:3, 2], contact, valid=valid, age=age, pad_force=pad)
                 action = self.actor(obs)
                 targets = iface.apply_action(action, self.arm_speed_scale)
                 self.send(targets)
                 rows.append(dict(t=time.monotonic(), late=late, q=q, object_pos=pos, object_quat=quat, pose_age=age,
-                                 contact=contact, tactile_force=force, obs=obs, action=action, targets=targets,
-                                 stage=iface.stage, tracking_error=error))
+                                 pose_valid=valid, contact=contact, tactile_force=force, obs=obs, action=action,
+                                 targets=targets, stage=iface.stage, tracking_error=error,
+                                 **({} if iface.estimate is None else dict(
+                                     pad_force=pad, estimated_pos=iface.estimate[0], estimated_axis=iface.estimate[1],
+                                     estimate_log_std=iface.estimate[2]))))
                 if k % 30 == 0:
                     self.log(f'step {k:4d}: stage {iface.stage}, keypoint error '
                              f'{iface.keypoint_distance(pos, quat)*1000:6.1f} mm, pose age {age*1000:4.0f} ms, '
@@ -360,6 +387,9 @@ def save_episode(path, rows, outcome):
             'targets', 'stage', 'tracking_error')
     data = {k: np.array([r[k] for r in rows]) for k in keys}
     data['distance'] = np.array([r.get('distance', np.nan) for r in rows])
+    for key in ('pose_valid', 'pad_force', 'estimated_pos', 'estimated_axis', 'estimate_log_std'):   # pose estimator
+        if rows and key in rows[0]:
+            data[key] = np.array([r[key] for r in rows])
     np.savez_compressed(path, outcome=outcome, **data)
 
 
@@ -442,7 +472,7 @@ def main(argv=None):
     if not args.mock and args.handeye is None:
         parser.error('--handeye is required on the real robot')
 
-    iface = Step1Interface(load_reference(REFERENCES[args.step]))
+    iface = Step1Interface(load_reference(REFERENCES[args.step]), estimator=ESTIMATORS.get(args.step))
     args.model = args.model or MODELS[args.step]
     actor = load_actor(args.model, iface)
     config = arm_config(args.config, iface, args.handeye, args.arm_velocity)

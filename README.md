@@ -112,6 +112,43 @@ step2 把 gear48（黄色）装到右销钉上，左销钉上已经装好 gear24
 
 **底板位置和 step1 不同**：step2 训练时底板在 y = -0.210，step1 在 -0.125，差 8.5 cm；起点 y 也改为 -0.098。真机按 step2 的训练位置摆底板，用 `run_setup.sh --step 2` 核对，把 gear48 套到右销钉上检查。
 
+### step2：遮挡感知策略和齿轮位姿估计器（2026-11-05）
+
+手一握住齿轮，固定相机就看不到它了，FoundationPose 的位姿会丢失。gx4m_learning 这一版 step2 不再让策略直接使用跟踪位姿，而是在策略前面放一个学习出来的**齿轮位姿估计器**（`pose_estimator.py`，GRU 网络）。
+
+- **估计器输入（82 维）**：关节角、上一步目标、手掌姿态、指尖位置、跟踪位姿（丢失时保持最后一次的值）、位姿是否有效、丢失了多久、四指指腹三轴力。
+- **估计器输出**：齿轮在手掌坐标系里的位置和轴向，以及不确定度。
+- **策略输入（80 维）**：原来的 78 维里，齿轮位姿三项换成估计值，再加 2 维不确定度。
+
+参考配置里的 `pose_estimator` 段记录了输入布局和缩放常数。`Step1Interface(reference, estimator=ESTIMATORS[2])` 会按训练时的方式拼出估计器输入。
+
+主循环 `run_step1.py` 和 `robot_server.py` 在有估计器时的行为：
+- 位姿在 `valid_pose_age`（0.1 s）以内算"跟踪到"；更旧的位姿仍然保留并喂给估计器，同时标成丢失。超过 `max_lost_age`（10 s）才以 `pose_lost` 停止。
+- 相机丢失期间，阶段判断（预插入、插到位、撤手）用估计器给出的位姿。
+- 触觉改用 `FingertipContacts.pad_forces()` 读三轴力，0/1 接触改成按法向力超过 0.3 N 判断。
+
+每回合保存的数据里新增 `pose_valid`、`pad_force`、`estimated_pos`、`estimated_axis`、`estimate_log_std`。
+
+当前部署的模型：
+- `models/step2_lstm_20261105_iter1500.pt` 和 `models/step2_estimator_20261105_iter1500.pt`，来自 gx4m_learning 的 `gx4m_dexlong_gear3_split_step2/2026-11-05_11-37-02` 第 1500 次迭代。这一轮训练加了指腹接触奖励、新基座、遮挡模型（阈值 0.65）和动作平滑惩罚。
+- **这是训练早期的检查点**：训练成功率约 2%，抬起率约 0.9。它用来打通接口，还不能用来完成任务。训练结束后按下面的方法换成最终模型。
+
+更新步骤：
+1. 在 gx4m_learning 里导出：
+
+   ```powershell
+   C:\env_isaaclab\python.exe scripts\export_gear3_split_sim2sim_reference.py --step 2 --checkpoint <model_*.pt> --out <目录> --steps 600
+   ```
+
+   脚本会自动加载同目录下的 `estimator_*.pt`，并把它复制成 `<目录>/estimator.pt`。
+2. 把 `reference.json` 复制到 `config/step2_reference.json` 和 `tests/data/step2_isaac_reference.json`，`rollout.npz` 复制到 `tests/data/step2_isaac_rollout.npz`，模型和估计器放进 `models/`，并修改 `step1.MODELS` 和 `ESTIMATORS`。
+3. 运行 `python -m unittest tasks.dexlong_gear3.tests.test_step1`。step2 的测试会逐步对比估计器输入、估计器输出、80 维观测、动作映射和策略输出。
+
+**还要在真机上确认的**：
+- PaXini 三轴到指腹坐标系的映射（`gx4m_real/robot/tactile.py` 的 `PAD_AXES`）：现在假设传感器 x 轴沿手指、y 轴是侧向、法向不变，正负号都没核对。往指尖方向和侧向分别推一下，检查 `pad_forces()` 的符号。
+- 力的比例 0.1 N/count。
+- MuJoCo 闭环工具没有遮挡和触觉模型：有估计器时，它把真实位姿当作一直能跟踪到，指腹力给 0，所以只能检查接口能不能跑通。
+
 ### 基座位姿更新（2026-11-04）
 
 训练侧把机器人基座从 (0.1196, -0.3107, 0.8868) 移到 (0.1196, -0.3337, 0.8858)：y 减 23 mm、z 减 1 mm，并绕世界 x 轴倾斜约 3.3°（`base_wxyz` (0.7068, 0.0202, 0.0202, -0.7068)）。同步了这些文件：

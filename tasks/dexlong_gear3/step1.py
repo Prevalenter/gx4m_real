@@ -17,6 +17,12 @@ config/step<n>_reference.json is exported by gx4m_learning's scripts/export_gear
 (--step n): joint order and limits, palm and fingertip bodies and offsets, robot base pose, goals, stage
 settings (p2p), control constants. All positions are in the Isaac env frame: the robot root link sits at
 base_pos / base_quat. Quaternions are wxyz except palm_rot inside the observation, which is xyzw like Isaac's.
+
+Occlusion-aware references (a pose_estimator block, step2 since 2026-11-05): the camera loses the gear behind the
+hand, so the policy acts on a learned estimate (pose_estimator.py) instead of the tracked pose. observation() then
+also takes whether the tracked pose is current (valid), how old it is (age, s) and the tared pad forces (4, 3) N as
+(normal into the pad, distal, lateral); object_pos/object_axis are the last tracked pose, held while lost.
+estimated_pose() gives the estimate in the env frame for the stage logic while the camera has lost the gear.
 """
 from __future__ import annotations
 
@@ -31,7 +37,9 @@ from gx4m_real.robot.kinematics import UrdfFK, quat_matrix
 HERE = Path(__file__).resolve().parent
 # Deployed policy per split step and the reference exported with it.
 REFERENCES = {1: HERE/'config'/'step1_reference.json', 2: HERE/'config'/'step2_reference.json'}
-MODELS = {1: HERE/'models'/'step1_lstm_20261103_iter4750.pt', 2: HERE/'models'/'step2_lstm_20261104_iter4000.pt'}
+MODELS = {1: HERE/'models'/'step1_lstm_20261103_iter4750.pt', 2: HERE/'models'/'step2_lstm_20261105_iter1500.pt'}
+# Gear pose estimator saved with each occlusion-aware policy (reference['pose_estimator']).
+ESTIMATORS = {2: HERE/'models'/'step2_estimator_20261105_iter1500.pt'}
 REFERENCE = REFERENCES[1]
 URDF = HERE.parents[1]/'asset/gx7_right/urdf/gx7_right_gx4m_cam_xl330.urdf'
 
@@ -62,7 +70,8 @@ class Step1Interface:
     Per control step (1/30 s): obs = observation(...); targets = apply_action(actor(obs)); send the targets;
     after the step, measure again and call update(...), which advances the stage and says when to stop."""
 
-    def __init__(self, reference=None, urdf=URDF):
+    def __init__(self, reference=None, urdf=URDF, estimator=None):
+        """estimator: the pose estimator weights (estimator_<it>.pt) a reference with a pose_estimator block needs."""
         r = self.ref = reference or load_reference()
         self.joint_order = list(r['joint_order'])
         self.lower, self.upper = np.array(r['lower']), np.array(r['upper'])
@@ -89,6 +98,16 @@ class Step1Interface:
         self.grasp_position = np.array(r['grasp_position'])
         self.goals = [(np.array(r['preinsert_pos']), np.array(r['preinsert_quat'])),
                       (np.array(r['final_pos']), np.array(r['final_quat']))]
+        self.estimator, self.estimate = None, None
+        if r.get('pose_estimator'):
+            try:
+                from .pose_estimator import PoseEstimator
+            except ImportError:                    # imported as a top-level module (tests, tools)
+                from pose_estimator import PoseEstimator
+            if estimator is None:
+                raise ValueError('This reference needs the pose estimator weights (estimator=...)')
+            pe = r['pose_estimator']
+            self.estimator = PoseEstimator(estimator, pe['inputs'], pe['hidden'])
         self.reset()
 
     def reset(self, targets=None):
@@ -96,6 +115,9 @@ class Step1Interface:
         reference initial pose, where every episode must start)."""
         self.targets = np.array(self.ref['initial_joint_pos'] if targets is None else targets, dtype=np.float64)
         self.stage, self.near_steps, self.stage_steps, self.retracted = 0, 0, 0, False
+        if self.estimator is not None:
+            self.estimator.reset()                 # fresh hidden state, as at an Isaac episode start
+            self.estimate = None
 
     @property
     def goal(self):
@@ -112,9 +134,11 @@ class Step1Interface:
         tips = np.stack([poses[b][:3, 3] + poses[b][:3, :3] @ o for b, o in zip(self.tip_bodies, self.tip_offsets)])
         return palm, self.palm_sign*self.fk.link_quats(joints)[self.palm_body], tips
 
-    def observation(self, q, object_pos, object_axis, contact):
+    def observation(self, q, object_pos, object_axis, contact, valid=True, age=0., pad_force=None):
         """q: measured joint positions (23,) rad; object_pos: gear origin (3,); object_axis: gear +z axis (3,),
-        both in the env frame; contact: 0/1 object contact per finger (4,)."""
+        both in the env frame; contact: 0/1 object contact per finger (4,). With the pose estimator: object_pos and
+        object_axis are the last tracked pose, valid whether it is from this step, age the seconds since it was
+        current, pad_force the tared pad forces (4, 3) N (normal, distal, lateral)."""
         q = np.asarray(q, dtype=np.float64)
         palm, palm_quat, tips = self.palm_and_tips(q)
         object_pos = np.asarray(object_pos, dtype=np.float64)
@@ -130,11 +154,42 @@ class Step1Interface:
             object_axis=axis/np.linalg.norm(axis),
             fingertip_object_contact=np.asarray(contact, dtype=np.float64),
         )
+        if self.estimator is not None:
+            values.update(self._estimate(values, palm, palm_quat, tips, object_pos, axis, valid, age, pad_force))
         missing = [n for n, _ in self.fields if n not in values]
         if missing:
             raise ValueError(f'Reference asks for observation fields this interface does not build: {missing}')
         obs = np.concatenate([np.ravel(values[n]) for n, _ in self.fields])
         return np.clip(obs, -self.clip, self.clip)
+
+    def _estimate(self, values, palm, palm_quat, tips, object_pos, axis, valid, age, pad_force):
+        """Gear pose fields of the observation from the estimator (gx4m_learning split_env._estimate)."""
+        pe = self.ref['pose_estimator']
+        R = quat_matrix(palm_quat/np.linalg.norm(palm_quat))
+        scale = pe['position_scale']
+        force = np.zeros((4, 3)) if pad_force is None else np.asarray(pad_force, dtype=np.float64)
+        x = np.concatenate((values['joint_pos'], self.targets, values['palm_rot'], ((tips - palm) @ R).ravel()*scale,
+                            R.T @ (object_pos - palm)*scale, R.T @ (axis/np.linalg.norm(axis)), [float(valid)],
+                            [min(age/pe['max_age_s'], 1.)], force.ravel()/pe['tactile_force_scale']))
+        pos, est_axis, log_std = self.estimator.step(x)
+        rel = R @ pos/scale
+        world_axis = R @ est_axis
+        self.estimate = (palm + rel, world_axis, log_std)
+        return dict(object_pos_rel_palm=rel, object_pos_rel_goal=palm + rel - self.goal[0], object_axis=world_axis,
+                    object_pose_std=log_std)
+
+    def estimated_pose(self):
+        """The last estimate in the env frame: gear origin (3,) and a wxyz quaternion with the estimated axis as +z
+        (yaw arbitrary, which the yaw-free goal ignores); None before the first observation."""
+        if self.estimate is None:
+            return None
+        pos, axis = self.estimate[:2]
+        z = np.array([0., 0., 1.])
+        c, v = float(z @ axis), np.cross(z, axis)
+        quat = np.array([1. + c, *v])
+        if quat[0] < 1e-9:                       # axis pointing straight down
+            quat = np.array([0., 1., 0., 0.])
+        return pos, quat/np.linalg.norm(quat)
 
     def apply_action(self, action, arm_speed_scale=None):
         """Policy action (23,) in [-1, 1] -> new joint targets (23,) rad, kept for prev_action_targets.

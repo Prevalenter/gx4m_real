@@ -18,7 +18,7 @@ sys.path[:0] = [str(HERE.parents[2]), str(HERE.parent)]
 
 from gx4m_real.policy import RslRlActor  # noqa: E402
 from gx4m_real.robot.kinematics import quat_matrix  # noqa: E402
-from step1 import MODELS, REFERENCES, Step1Interface, load_reference  # noqa: E402
+from step1 import ESTIMATORS, MODELS, REFERENCES, Step1Interface, load_reference  # noqa: E402
 
 
 def main():
@@ -42,7 +42,9 @@ def main():
     ref = load_reference(REFERENCES[args.step])
     args.model = args.model or MODELS[args.step]
     env = replica.MujocoGearEnv(ref, 1, args.substeps)
-    iface, actor = Step1Interface(ref), RslRlActor(args.model)
+    # With the pose estimator the replica feeds the true pose as always tracked and no pad forces (no
+    # occlusion or tactile model in MuJoCo).
+    iface, actor = Step1Interface(ref, estimator=ESTIMATORS.get(args.step)), RslRlActor(args.model)
     rng = None if args.fixed_start else np.random.default_rng(args.seed)
     threshold = ref['binary_tactile_threshold_n']
     print(f'{actor.kind} actor {args.model.name}; {args.episodes} episodes, '

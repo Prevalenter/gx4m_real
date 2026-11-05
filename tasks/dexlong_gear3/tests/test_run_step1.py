@@ -21,7 +21,8 @@ from gx4m_real.robot.tactile import FingertipContacts                   # noqa: 
 from gx4m_real.robot.tests.test_tactile import FakeTotal                # noqa: E402
 from tasks.dexlong_gear3.run_step1 import (CONTROL_CONFIG, MODEL, CameraToEnv, FixedGearPose,  # noqa: E402
                                            Step1Runner, UdpGearPose, pose_matrix)
-from tasks.dexlong_gear3.step1 import Step1Interface                    # noqa: E402
+from tasks.dexlong_gear3.step1 import (ESTIMATORS, MODELS, REFERENCES, Step1Interface,  # noqa: E402
+                                       load_reference)
 
 HANDEYE = ROOT/'apps/charuco_handeye/runtime/calibration_20261031_fkzero/handeye_result.json'
 
@@ -121,6 +122,30 @@ class Step1RunnerTests(unittest.TestCase):
         outcome, rows = runner.episode(max_steps=30)
         self.assertEqual((outcome, rows), ('tactile_lost', []))
         self.assertEqual(runner.arm.mode, 'hold')
+
+    def test_pose_estimator_keeps_running_while_the_gear_is_lost(self):
+        """step2: a gear pose older than valid_pose_age is held and flagged instead of stopping the episode."""
+        iface = Step1Interface(load_reference(REFERENCES[2]), estimator=ESTIMATORS[2])
+        config = dataclasses.replace(load_config(CONTROL_CONFIG), velocity_limit=1.5)
+        arm, hand = ArmDriver(config, mock=True), HandDriver(mock=True)
+        arm.connect()
+        hand.connect()
+        self.addCleanup(arm.disconnect)
+        self.addCleanup(hand.close)
+        tactile = FingertipContacts([FakeTotal(0) for _ in range(4)], period=.001)
+        self.addCleanup(tactile.close)
+        runner = Step1Runner(iface, RslRlActor(MODELS[2]), arm, hand,
+                             StaleGearPose(iface.ref['object_pos'], iface.ref['object_quat']), CameraToEnv(),
+                             tactile=tactile, approach_speed=1., log=lambda message: None)
+        runner.move_to_start()
+        outcome, rows = runner.episode(max_steps=10)
+        self.assertEqual((outcome, len(rows)), ('max_steps', 10))
+        self.assertFalse(rows[0]['pose_valid'])
+        self.assertEqual(rows[0]['obs'].shape, (80,))
+        self.assertEqual(rows[0]['pad_force'].shape, (4, 3))
+        self.assertIn('estimated_pos', rows[-1])
+        runner.max_lost_age = 1.                                     # 2 s old: now too old even for the estimator
+        self.assertEqual(runner.episode(max_steps=10)[0], 'pose_lost')
 
 
 class GearPoseTests(unittest.TestCase):

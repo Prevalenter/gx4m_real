@@ -149,16 +149,24 @@ class PaXiniL3530:
         return np.array([int.from_bytes(raw[i:i + 1], 'little', signed=i < 2) for i in range(3)], dtype=float)
 
 
+# Sensor total-force axes -> the pad frame the policy was trained with (gx4m_learning split_env _pad_tactile):
+# (normal into the pad, distal shear along the finger, lateral shear), each as (sensor axis 0/1/2 = x/y/normal,
+# sign). The shear mapping is NOT verified on the hand yet: push a fingertip towards its tip and sideways and
+# check the signs of pad_forces() before trusting it.
+PAD_AXES = ((2, 1.), (0, 1.), (1, 1.))
+
+
 class FingertipContacts:
     """Binary fingertip contact from one sensor per finger, in the given order (FINGERS: thumb first). A thread per
     sensor polls its total-force register every period s; contacts() uses each sensor's newest reading. The
-    normal force is newton_per_count * raw count (hora's scale, not calibrated here) minus the tare."""
+    normal force is newton_per_count * raw count (hora's scale, not calibrated here) minus the tare; pad_forces()
+    gives all three axes in the pad frame (PAD_AXES)."""
 
     def __init__(self, sensors, *, threshold_n=.3, newton_per_count=.1, period=.005):
         self.sensors = list(sensors)
         self.threshold_n, self.newton_per_count, self.period = threshold_n, newton_per_count, period
         n = len(self.sensors)
-        self.latest, self.errors, self.offset = [None]*n, [None]*n, np.zeros(n)
+        self.latest, self.errors, self.offset, self.offset3 = [None]*n, [None]*n, np.zeros(n), np.zeros((n, 3))
         self.lock, self.running = threading.Lock(), True
         self.threads = [threading.Thread(target=self._poll, args=(i,), daemon=True, name=f'paxini-{i}')
                         for i in range(n)]
@@ -183,16 +191,17 @@ class FingertipContacts:
         sensor = self.sensors[i]
         while self.running:
             try:
-                normal = float(sensor.read_total()[2])
+                total = np.asarray(sensor.read_total(), dtype=float)
                 with self.lock:
-                    self.latest[i], self.errors[i] = (time.monotonic(), normal), None
+                    self.latest[i], self.errors[i] = (time.monotonic(), total), None
             except Exception as exc:        # timeouts, bad frames: keep polling; normals() reports the age
                 with self.lock:
                     self.errors[i] = exc
             time.sleep(self.period)
 
-    def normals(self, max_age=.2):
-        """Newest normal force per sensor (N, before the tare); RuntimeError if one is older than max_age s."""
+    def totals(self, max_age=.2):
+        """Newest total force per sensor (n, 3): shear x, y and normal in N, before the tare; RuntimeError if one is
+        older than max_age s."""
         now = time.monotonic()
         with self.lock:
             latest, errors = list(self.latest), list(self.errors)
@@ -201,6 +210,10 @@ class FingertipContacts:
             raise RuntimeError('PaXini reading too old: ' + ', '.join(
                 f'sensor {i} ({errors[i] or "no reading"})' for i in stale))
         return self.newton_per_count*np.array([reading[1] for reading in latest])
+
+    def normals(self, max_age=.2):
+        """Newest normal force per sensor (N, before the tare)."""
+        return self.totals(max_age)[:, 2]
 
     def wait(self, timeout=2.):
         """Block until every sensor has a reading; RuntimeError after timeout s."""
@@ -215,15 +228,22 @@ class FingertipContacts:
 
     def tare(self, duration=.2):
         """Mean normal force over duration s becomes each sensor's zero: call with the fingers touching nothing."""
-        samples, end = [self.wait()], time.monotonic() + duration
+        self.wait()
+        samples, end = [self.totals()], time.monotonic() + duration
         while time.monotonic() < end:
             time.sleep(self.period)
-            samples.append(self.normals())
-        self.offset = np.mean(samples, axis=0)
+            samples.append(self.totals())
+        self.offset3 = np.mean(samples, axis=0)
+        self.offset = self.offset3[:, 2]
         return self.offset
 
     def forces(self, max_age=.2):
         return self.normals(max_age) - self.offset
+
+    def pad_forces(self, max_age=.2):
+        """Tared force per sensor in the pad frame (n, 3): normal into the pad, distal and lateral shear, N."""
+        total = self.totals(max_age) - self.offset3
+        return np.stack([sign*total[:, axis] for axis, sign in PAD_AXES], -1)
 
     def contacts(self, max_age=.2):
         """(0/1 contact per sensor, tared normal force N)."""

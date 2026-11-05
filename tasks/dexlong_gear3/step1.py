@@ -37,9 +37,9 @@ from gx4m_real.robot.kinematics import UrdfFK, quat_matrix
 HERE = Path(__file__).resolve().parent
 # Deployed policy per split step and the reference exported with it.
 REFERENCES = {1: HERE/'config'/'step1_reference.json', 2: HERE/'config'/'step2_reference.json'}
-MODELS = {1: HERE/'models'/'step1_lstm_20261103_iter4750.pt', 2: HERE/'models'/'step2_lstm_20261105_iter1500.pt'}
+MODELS = {1: HERE/'models'/'step1_lstm_20261103_iter4750.pt', 2: HERE/'models'/'step2_lstm_20261105_iter4500.pt'}
 # Gear pose estimator saved with each occlusion-aware policy (reference['pose_estimator']).
-ESTIMATORS = {2: HERE/'models'/'step2_estimator_20261105_iter1500.pt'}
+ESTIMATORS = {2: HERE/'models'/'step2_estimator_20261105_iter4500.pt'}
 REFERENCE = REFERENCES[1]
 URDF = HERE.parents[1]/'asset/gx7_right/urdf/gx7_right_gx4m_cam_xl330.urdf'
 

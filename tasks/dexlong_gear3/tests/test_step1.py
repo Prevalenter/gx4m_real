@@ -6,7 +6,7 @@ episodes): per step k the Isaac policy observation obs[k], its action[k], and th
 joint targets targets[k], gear pose and stage after that action, which the next observation obs[k+1] is
 built from. On a step with done[k] the recorded state is already the reset one.
 
-step2_isaac_rollout.npz is the --step 2 output for the occlusion-aware models/step2_lstm_20261105_iter1500.pt with
+step2_isaac_rollout.npz is the --step 2 output for the occlusion-aware models/step2_lstm_20261105_iter4500.pt with
 its pose estimator (600 steps, the camera losing the gear in every episode; this early checkpoint does not finish
 the task). It also records what produced each observation: the tracked gear pose (held while lost), valid flag and
 age, pad forces, 0/1 contact, and the estimator's input and output.

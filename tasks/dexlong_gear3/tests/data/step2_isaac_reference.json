@@ -1,6 +1,6 @@
 {
  "task": "gear3_split_step2",
- "checkpoint": "E:\\work\\gx4max\\gx4m_learning\\logs\\rsl_rl\\gx4m_dexlong_gear3_split_step2\\2026-11-05_11-37-02\\model_1500.pt",
+ "checkpoint": "E:\\work\\gx4max\\gx4m_learning\\logs\\rsl_rl\\gx4m_dexlong_gear3_split_step2\\2026-11-05_11-37-02\\model_4500.pt",
  "joint_order": [
   "joint1",
   "joint2",

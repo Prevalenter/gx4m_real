@@ -41,7 +41,15 @@ MODELS = {1: HERE/'models'/'step1_lstm_20261103_iter4750.pt', 2: HERE/'models'/'
 # Gear pose estimator saved with each occlusion-aware policy (reference['pose_estimator']).
 ESTIMATORS = {2: HERE/'models'/'step2_estimator_20261105_iter4500.pt'}
 REFERENCE = REFERENCES[1]
-URDF = HERE.parents[1]/'asset/gx7_right/urdf/gx7_right_gx4m_cam_xl330.urdf'
+URDF = HERE.parents[1]/'asset/gx7_right/urdf/gx7_right_gx4m_cam_xl330_pad.urdf'
+
+
+def reference_urdf(reference):
+    """The URDF the reference was trained with (its robot_urdf, a gx4m_learning path), from this repo's asset/.
+    Same rule in perception/viser_scene.py (other environment)."""
+    name = str(reference.get('robot_urdf', '')).replace('\\', '/').rsplit('/', 1)[-1]
+    path = URDF.parent/name
+    return path if name and path.exists() else URDF
 
 
 def load_reference(path=REFERENCE):
@@ -70,9 +78,11 @@ class Step1Interface:
     Per control step (1/30 s): obs = observation(...); targets = apply_action(actor(obs)); send the targets;
     after the step, measure again and call update(...), which advances the stage and says when to stop."""
 
-    def __init__(self, reference=None, urdf=URDF, estimator=None):
-        """estimator: the pose estimator weights (estimator_<it>.pt) a reference with a pose_estimator block needs."""
+    def __init__(self, reference=None, urdf=None, estimator=None):
+        """urdf: default the reference's training URDF. estimator: the pose estimator weights (estimator_<it>.pt) a
+        reference with a pose_estimator block needs."""
         r = self.ref = reference or load_reference()
+        self.urdf = urdf = Path(urdf) if urdf is not None else reference_urdf(r)
         self.joint_order = list(r['joint_order'])
         self.lower, self.upper = np.array(r['lower']), np.array(r['upper'])
         self.fields = list(r['policy_fields'].items())

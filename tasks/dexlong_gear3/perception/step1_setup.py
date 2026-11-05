@@ -39,7 +39,8 @@ from scipy.spatial.transform import Rotation
 import trimesh
 
 from gears import DEFAULT_GEAR, PLATE_MESH, gear_mesh_path
-from viser_scene import DEFAULT_INITIAL, SceneViewer, initial_base, load_calibration, rigid, set_pose, world_object
+from viser_scene import (DEFAULT_INITIAL, SceneViewer, initial_base, load_calibration, reference_urdf, rigid, set_pose,
+                         world_object)
 
 HERE = Path(__file__).resolve().parent
 REFERENCE = HERE.parent/'config'/'step1_reference.json'
@@ -132,6 +133,7 @@ def mesh_handle(server, name, mesh, color, opacity, T):
 
 class Step1Setup(SceneViewer):
     def __init__(self, calibration, *, reference, history=15, plate=None, gear=DEFAULT_GEAR, **kwargs):
+        kwargs.setdefault('urdf', reference_urdf(reference))       # the robot the step was trained with
         super().__init__(calibration, gear=gear, **kwargs)
         self.ref, self.history = reference, deque(maxlen=history)
         scene = self.server.scene

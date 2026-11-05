@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT/'tasks/dexlong_gear3/tools'))
 
 import identify_arm as A                                                # noqa: E402
 from tasks.dexlong_gear3.run_step1 import CONTROL_CONFIG, arm_config    # noqa: E402
-from tasks.dexlong_gear3.step1 import URDF, Step1Interface              # noqa: E402
+from tasks.dexlong_gear3.step1 import Step1Interface                    # noqa: E402
 
 
 class PlanTests(unittest.TestCase):
@@ -27,7 +27,7 @@ class PlanTests(unittest.TestCase):
         cls.lower, cls.upper = config.compensation.model_limits(config.lower, config.upper)
         cls.lower, cls.upper = cls.lower + A.LIMIT_MARGIN, cls.upper - A.LIMIT_MARGIN
         cls.start = np.asarray(cls.iface.ref['initial_joint_pos'][:7], float)
-        cls.geometry = A.RobotGeometry(cls.iface, URDF, A.HANDEYE)
+        cls.geometry = A.RobotGeometry(cls.iface, cls.iface.urdf, A.HANDEYE)
         cls.hand = np.asarray(cls.iface.ref['initial_joint_pos'][7:], float)
 
     def test_plan_moves_one_joint_at_a_time_within_speed(self):
@@ -75,11 +75,11 @@ class RunnerTests(unittest.TestCase):
         lower, upper = config.compensation.model_limits(config.lower, config.upper)
         targets, index, segments, clear, skipped = A.build_plan([('start', start)], lower + A.LIMIT_MARGIN,
                                                                 upper - A.LIMIT_MARGIN)
-        geometry = A.RobotGeometry(iface, URDF, A.HANDEYE)
+        geometry = A.RobotGeometry(iface, iface.urdf, A.HANDEYE)
         plan = dict(iface=iface, config=config, targets=targets, index=index, segments=segments, geometry=geometry,
                     hand_q=np.asarray(iface.ref['initial_joint_pos'][7:]), per=dict(enumerate(clear)),
                     skipped=skipped, problems=[], limits=dict(table=-1., plate=-1., camera=-1., self=-1.),
-                    poses=[('start', start)], urdf=URDF)
+                    poses=[('start', start)], urdf=iface.urdf)
         from gx4m_real.robot.hand import HandDriver
         with tempfile.TemporaryDirectory() as out:
             runner = A.PlanRunner(plan, mock=True, out_root=Path(out), log=lambda m: None,

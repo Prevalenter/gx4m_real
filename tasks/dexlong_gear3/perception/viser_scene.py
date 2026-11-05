@@ -18,7 +18,14 @@ from gears import DEFAULT_GEAR, DISPLAY_RGB, GEAR_COLORS, GEARS, check_gear_mesh
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
-DEFAULT_URDF = ROOT / 'asset/gx7_right/urdf/gx7_right_gx4m_cam_xl330.urdf'
+DEFAULT_URDF = ROOT / 'asset/gx7_right/urdf/gx7_right_gx4m_cam_xl330_pad.urdf'
+
+
+def reference_urdf(reference):
+    """The URDF a step reference was trained with (same rule as tasks/dexlong_gear3/step1.reference_urdf)."""
+    name = str(reference.get('robot_urdf', '')).replace('\\', '/').rsplit('/', 1)[-1]
+    path = DEFAULT_URDF.parent / name
+    return path if name and path.exists() else DEFAULT_URDF
 DEFAULT_INITIAL = HERE.parent / 'config/initial_pose.json'
 JOINTS = [f'joint{i}' for i in range(1, 8)]
 

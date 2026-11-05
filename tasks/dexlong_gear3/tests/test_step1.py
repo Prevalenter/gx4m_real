@@ -257,5 +257,20 @@ class Step2EstimatorRolloutTests(unittest.TestCase):
         np.testing.assert_allclose(pos, iface.estimate[0])
 
 
+class TrainingUrdfTests(unittest.TestCase):
+    def test_each_step_uses_its_training_urdf(self):
+        self.assertEqual(Step1Interface(load_reference(REFERENCES[1])).urdf.name, 'gx7_right_gx4m_cam_xl330.urdf')
+        self.assertEqual(Step1Interface(load_reference(REFERENCES[2]), estimator=ESTIMATORS[2]).urdf.name,
+                         'gx7_right_gx4m_cam_xl330_pad.urdf')
+
+    def test_pad_urdf_has_the_same_palm_and_fingertips(self):
+        ref = load_reference(REFERENCES[2])
+        plain = Step1Interface(ref, urdf=Step1Interface(load_reference(REFERENCES[1])).urdf, estimator=ESTIMATORS[2])
+        pad = Step1Interface(ref, estimator=ESTIMATORS[2])
+        q = np.asarray(ref['initial_joint_pos']) + np.random.default_rng(0).uniform(-.2, .2, len(ref['joint_order']))
+        for a, b in zip(plain.palm_and_tips(q), pad.palm_and_tips(q)):
+            np.testing.assert_allclose(a, b, atol=1e-12)
+
+
 if __name__ == '__main__':
     unittest.main()

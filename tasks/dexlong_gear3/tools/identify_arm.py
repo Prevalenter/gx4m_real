@@ -271,14 +271,14 @@ def descent_pose(paths, geometry, hand_q, min_table=.08):
 
 def plan_from_args(args):
     from tasks.dexlong_gear3.run_step1 import CONTROL_CONFIG, arm_config
-    from tasks.dexlong_gear3.step1 import URDF, Step1Interface
+    from tasks.dexlong_gear3.step1 import Step1Interface
 
     iface = Step1Interface()
     config = arm_config(CONTROL_CONFIG, iface, args.handeye, None)
     lower, upper = config.compensation.model_limits(config.lower, config.upper)
     lower, upper = lower + LIMIT_MARGIN, upper - LIMIT_MARGIN
     episodes = sorted(EPISODES.glob('step1_*/episode_*.npz'))
-    geometry = RobotGeometry(iface, URDF, args.handeye)
+    geometry = RobotGeometry(iface, iface.urdf, args.handeye)
     hand_q = np.asarray(iface.ref['initial_joint_pos'][7:], float)
     limits = dict(table=args.table_clearance, plate=args.plate_clearance, camera=0., self=args.self_clearance)
     poses = [('start', np.asarray(iface.ref['initial_joint_pos'][:7], float))]
@@ -293,7 +293,7 @@ def plan_from_args(args):
         raise SystemExit(f'Plan leaves the joint limits (less {np.degrees(LIMIT_MARGIN):.0f} deg) at J{bad.tolist()}')
     return dict(iface=iface, config=config, targets=targets, index=index, segments=segments, geometry=geometry,
                 hand_q=hand_q, per=dict(enumerate(clear)), skipped=skipped, problems=[], limits=limits,
-                poses=poses, urdf=URDF)
+                poses=poses, urdf=iface.urdf)
 
 
 def summary(plan):

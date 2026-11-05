@@ -122,6 +122,8 @@ step2 把 gear48（黄色）装到右销钉上，左销钉上已经装好 gear24
 
 参考配置里的 `pose_estimator` 段记录了输入布局和缩放常数。`Step1Interface(reference, estimator=ESTIMATORS[2])` 会按训练时的方式拼出估计器输入。
 
+URDF 按参考配置的 `robot_urdf` 选（`step1.reference_urdf`，Viser 页面同样）：step2 是 `gx7_right_gx4m_cam_xl330_pad.urdf`（gx4m_learning `b5ca8de`，指尖拆出单独的指腹刚体，网格在 `asset/gx7_right/meshes/gx4m_pad/`），step1 仍是 `gx7_right_gx4m_cam_xl330.urdf`。两者关节和 base_link 完全相同，指腹用零偏移的固定关节挂在指尖上，所以手掌和指尖位置一样。
+
 主循环 `run_step1.py` 和 `robot_server.py` 在有估计器时的行为：
 - 位姿在 `valid_pose_age`（0.1 s）以内算"跟踪到"；更旧的位姿仍然保留并喂给估计器，同时标成丢失。超过 `max_lost_age`（10 s）才以 `pose_lost` 停止。
 - 相机丢失期间，阶段判断（预插入、插到位、撤手）用估计器给出的位姿。

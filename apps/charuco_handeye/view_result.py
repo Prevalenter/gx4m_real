@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import socket
 import subprocess
+import tempfile
 import threading
 import time
 
@@ -137,6 +138,65 @@ def joint_reader(robot_config):
     from gx4m_real.robot.config import load_config
     from gx4m_real.robot.feedback import JointFeedbackReader
     return JointFeedbackReader(load_config(robot_config))
+
+
+# Same expression in tasks/dexlong_gear3/robot_server.py, which owns the CAN bus and the hand port while it runs.
+SERVER_KEY_PATH = Path(os.environ.get('XDG_RUNTIME_DIR') or tempfile.gettempdir())/'gx4m_step1_robot.key'
+
+
+class ServerFeed:
+    """The newest status of tasks/dexlong_gear3/robot_server.py (it serves one viewer at a time; nothing is sent).
+    Its arm angles are model angles under its own compensation: arm_motor() undoes that with the calibration's
+    joint directions and the server's offsets, so the viewer maps them with the calibration's compensation."""
+
+    def __init__(self, address, directions):
+        self.address, self.directions = address, list(directions)
+        self.lock, self.status, self.error = threading.Lock(), None, None
+        threading.Thread(target=self._run, daemon=True, name='server-feed').start()
+
+    def _run(self):
+        while True:
+            try:
+                key = bytes.fromhex(SERVER_KEY_PATH.read_text().strip())
+                with Client(self.address, authkey=key) as connection:
+                    while True:
+                        status = receive(connection)[0]
+                        with self.lock:
+                            self.status, self.error = status, None
+            except Exception as exc:
+                with self.lock:
+                    self.status, self.error = None, f'控制进程 {self.address[0]}:{self.address[1]}：{exc}'
+                time.sleep(RETRY_SEC)
+
+    def _q(self, names):
+        with self.lock:
+            status, error = self.status, self.error
+        if status is None:
+            raise RuntimeError(error or '等待控制进程状态')
+        q = status['q']
+        if not all(name in q for name in names):
+            raise RuntimeError('控制进程里这部分没有连接')
+        return np.array([q[name] for name in names]), status
+
+    def arm_motor(self):
+        q, status = self._q([f'joint{i}' for i in range(1, 8)])
+        return JointCompensation(tuple(self.directions), tuple(status['compensation_deg'])).to_motor(q)
+
+    def hand(self):
+        return self._q(HAND_JOINTS)[0]
+
+
+class FeedReader:
+    """Context manager with read(), like the hardware readers, on a ServerFeed."""
+
+    def __init__(self, read):
+        self.read = read
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        pass
 
 
 class GearWorker:
@@ -624,18 +684,33 @@ def main():
     parser.add_argument('--hand-port', help='With --live: draw the hand and read its angles here, e.g. /dev/ttyUSB0')
     parser.add_argument('--tactile', nargs='*', metavar='SERIAL',
                         help='With --live: show PaXini values of these USB serial numbers (none given: all found)')
+    parser.add_argument('--robot-server', metavar='HOST:PORT', nargs='?', const='127.0.0.1:5702',
+                        help='With --live: take the arm and hand angles from the running '
+                             'tasks/dexlong_gear3/robot_server.py (it holds CAN and the hand port) instead of '
+                             'reading them; read-only')
     args = parser.parse_args()
+    if args.robot_server and not args.live:
+        parser.error('--robot-server needs --live')
+    if args.robot_server and args.hand_port:
+        parser.error('--robot-server already gives the hand angles; leave out --hand-port')
     if (args.gear24 or args.no_cloud or args.hand_port or args.tactile is not None) and not args.live:
         parser.error('--gear24, --no-cloud, --hand-port and --tactile need --live')
     if args.gear24 and args.no_cloud:
         parser.error('--gear24 needs the camera')
     command = ['bash', str(GEAR_WORKER), '--gear', 'gear24', '--gpu', args.gear_gpu]
+    reader_factory = lambda: joint_reader(args.robot_config)
+    hand_factory = (lambda: HandFeedbackReader(args.hand_port)) if args.hand_port else None
+    if args.robot_server:
+        host, port = args.robot_server.rsplit(':', 1)
+        directions = json.loads(args.result.read_text())['joint_compensation']['directions']
+        feed = ServerFeed((host, int(port)), directions)
+        reader_factory, hand_factory = lambda: FeedReader(feed.arm_motor), lambda: FeedReader(feed.hand)
     ResultViewer(args.result, host=args.host, port=args.port, urdf=args.urdf,
                  pointcloud=args.pointcloud, cloud_stride=args.cloud_stride, live=args.live,
                  camera_factory=None if args.no_cloud else lambda: orbbec_stream(args.camera_device_index),
-                 reader_factory=lambda: joint_reader(args.robot_config), cloud_hz=args.cloud_hz,
+                 reader_factory=reader_factory, cloud_hz=args.cloud_hz,
                  gear_factory=(lambda stop: GearWorker(command, cancel=stop)) if args.gear24 else None,
-                 hand_factory=(lambda: HandFeedbackReader(args.hand_port)) if args.hand_port else None,
+                 hand_factory=hand_factory,
                  tactile_factory=None if args.tactile is None else lambda: paxini_sensors(args.tactile or None),
                  tactile_labels=lambda: paxini_labels(args.tactile or None)).run()
 

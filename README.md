@@ -151,6 +151,15 @@ URDF 按参考配置的 `robot_urdf` 选（`step1.reference_urdf`，Viser 页面
 - 力的比例 0.1 N/count。
 - MuJoCo 闭环工具没有遮挡和触觉模型：有估计器时，它把真实位姿当作一直能跟踪到，指腹力给 0，所以只能检查接口能不能跑通。
 
+### 法兰对齐修正（2026-11-06）
+
+`asset/gx7_right/urdf/gx7_right_gx4m_cam_xl330.urdf` 的 `gx4m_mount_joint`（Link7 → 手）从 `xyz="0 0 0.036" rpy="0 0 3.141"` 改成 `xyz="-0.00275 0.00032 0.036" rpy="0 0 π"`。Link7 和手的法兰都是圆柱，原来法兰轴线偏离 Link7 轴线 2.77 mm，现在偏差 0.01 mm。拟合方法和数据见 gx4m_learning 的 `experiment/dexlong_gear3_split/README.md`。
+
+- **正运动学**：手掌和指尖位置约有 2.8 mm 的变化。
+- **不受影响**：手眼标定（用的是 Link7）、关节补偿。
+- **step2 的参考配置和 Isaac 回放**：已经用修正后的 URDF 重新导出，模型不变。
+- **step1 的回放测试**：那份回放是用修正前的 URDF 录的，所以测试改用 `tests/data/gx7_right_gx4m_cam_xl330_before_flange_fix.urdf` 来回放。
+
 ### 基座位姿更新（2026-11-04）
 
 训练侧把机器人基座从 (0.1196, -0.3107, 0.8868) 移到 (0.1196, -0.3337, 0.8858)：y 减 23 mm、z 减 1 mm，并绕世界 x 轴倾斜约 3.3°（`base_wxyz` (0.7068, 0.0202, 0.0202, -0.7068)）。同步了这些文件：

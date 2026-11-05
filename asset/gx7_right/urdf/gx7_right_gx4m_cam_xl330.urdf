@@ -227,7 +227,7 @@
   </joint>
   
   <joint name="gx4m_mount_joint" type="fixed">
-    <origin xyz="0.0 0.0 0.036" rpy="0.0 0.0 3.141" />
+    <origin xyz="-0.00275 0.00032 0.036" rpy="0.0 0.0 3.141592653589793" />
     <parent link="Link7" />
     <child link="gx4m_base_link" />
   </joint>

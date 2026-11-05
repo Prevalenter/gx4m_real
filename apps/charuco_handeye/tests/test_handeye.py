@@ -494,5 +494,27 @@ class GeometryTests(unittest.TestCase):
             check_motion(poses)
 
 
+class J7OffsetTests(unittest.TestCase):
+    def test_save_writes_the_result_and_its_yaml(self):
+        from view_result import save_j7_offset
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            yaml_path = folder/'joint_compensation.yaml'
+            yaml_path.write_text('version: 1\n# keep me\njoints:\n'
+                                 + ''.join(f'  joint{i}:\n    direction: -1\n    offset_deg: {i}.5\n' for i in range(1, 8)))
+            result = folder/'handeye_result.json'
+            result.write_text(json.dumps({'joint_compensation': {'directions': [-1]*7, 'offsets_deg': [1.5]*7,
+                                                                 'source': str(yaml_path)}, 'other': 1}, indent=2))
+            result.chmod(0o644)
+            save_j7_offset(result, -12.3)
+            self.assertEqual(result.stat().st_mode & 0o777, 0o644)
+            data = json.loads(result.read_text())
+            self.assertEqual(data['joint_compensation']['offsets_deg'], [1.5]*6 + [-12.3])
+            self.assertEqual(data['other'], 1)
+            loaded = JointCompensation.load(yaml_path)
+            self.assertEqual(loaded.offsets_deg, (1.5, 2.5, 3.5, 4.5, 5.5, 6.5, -12.3))
+            self.assertIn('# keep me', yaml_path.read_text())
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -5,6 +5,7 @@ from datetime import datetime
 import json
 from multiprocessing.connection import Client
 import os
+import re
 from pathlib import Path
 import socket
 import subprocess
@@ -132,6 +133,36 @@ def paxini_sensors(serial_numbers=None):
     if not sensors:
         raise RuntimeError('没有找到 PaXini 触觉传感器')
     return sensors
+
+
+J7_RANGE_DEG = 60.
+
+
+def save_j7_offset(result_path, offset_deg):
+    """Write the J7 offset into a calibration result's joint_compensation and, when it names one, the source
+    joint_compensation.yaml (only the joint7 offset_deg line changes, comments stay). Atomic per file."""
+    result_path = Path(result_path)
+    result = json.loads(result_path.read_text())
+    result['joint_compensation']['offsets_deg'][6] = round(float(offset_deg), 4)
+    source = result['joint_compensation'].get('source')
+    if source and Path(source).exists():
+        text = Path(source).read_text()
+        updated, count = re.subn(r'(joint7:\n(?:[ \t]+\S.*\n)*?[ \t]+offset_deg:[ \t]*)[-+0-9.eE]+',
+                                 lambda m: m.group(1) + repr(round(float(offset_deg), 4)), text, count=1)
+        if count != 1:
+            raise ValueError(f'No joint7 offset_deg in {source}')
+        atomic_write(Path(source), updated)
+    atomic_write(result_path, json.dumps(result, indent=2) + '\n')
+
+
+def atomic_write(path, text):
+    """Replace path with text, keeping its permissions (a temporary file is created 0600)."""
+    mode = path.stat().st_mode & 0o777 if path.exists() else 0o664
+    with tempfile.NamedTemporaryFile('w', dir=path.parent, prefix=f'.{path.name}.', suffix='.tmp',
+                                     delete=False) as stream:
+        stream.write(text)
+    os.chmod(stream.name, mode)
+    os.replace(stream.name, path)
 
 
 def joint_reader(robot_config):
@@ -308,7 +339,7 @@ class ResultViewer:
             c = self.result['joint_compensation']
             # The extrinsic was solved with this mapping, so live motor angles must use it too.
             self.compensation = JointCompensation(tuple(c['directions']), tuple(c['offsets_deg']))
-        self.live_q = None
+        self.live_q = self.live_motor = None
         self.arm_shown = None
         self.hand_q = {}
         self.cloud = None
@@ -403,6 +434,7 @@ class ResultViewer:
                                 self.cloud.visible = event.target.value
                     w, h = self.result['image_size']
                     self.live_image = gui.add_image(np.zeros((h, w, 3), dtype=np.uint8), label='实时 RGB')
+            self.j7_panel(gui, Path(result_path))
         if gear_factory is not None:
             self.T_world_cam = transform(self.result['T_world_base']) @ transform(self.result['T_base_cam'])
             gear = trimesh.load(GEAR24_MESH, force='mesh')
@@ -541,10 +573,51 @@ class ResultViewer:
                 self.hand_status.content = f'灵巧手读取失败：{exc}（{RETRY_SEC:g} 秒后重试；模型保持上次姿态）'
                 stop.wait(RETRY_SEC)
 
+    def j7_panel(self, gui, result_path):
+        """A slider for the J7 zero offset, applied to the live arm at once; save writes it into the calibration
+        result (the compensation the deployment reads) and its joint_compensation.yaml. J7 turns the flange about
+        its own axis, which the board-on-flange solve absorbs in T_flange_board: T_base_cam stays valid."""
+        saved = lambda: float(json.loads(result_path.read_text())['joint_compensation']['offsets_deg'][6])
+        with gui.add_folder('J7 零位补偿'):
+            gui.add_markdown('拖动后模型的手立刻绕 J7 转，对照点云调到重合再保存。保存写入标定结果的关节补偿，'
+                             '部署（控制进程、主循环）重启后使用；手眼外参不受 J7 影响。')
+            slider = gui.add_slider('J7 补偿 (°)', min=-J7_RANGE_DEG, max=J7_RANGE_DEG, step=.1,
+                                    initial_value=self.compensation.offsets_deg[6])
+            status = gui.add_markdown('')
+            save, reload = gui.add_button('保存', color='green'), gui.add_button('恢复已保存')
+
+        def show(note=''):
+            state = '已保存' if abs(slider.value - saved()) < 1e-9 else '**未保存**'
+            status.content = (f'当前 J7 补偿 {slider.value:+.1f}°（{state}；文件里 {saved():+.1f}°）\n\n'
+                              f'文件：`{result_path}`' + (f'\n\n{note}' if note else ''))
+
+        @slider.on_update
+        def _(_):
+            offsets = list(self.compensation.offsets_deg)
+            offsets[6] = float(slider.value)
+            with self.lock:
+                self.compensation = JointCompensation(self.compensation.directions, tuple(offsets))
+                if self.live_motor is not None:
+                    self.show_joints(self.live_motor)
+            show()
+
+        @save.on_click
+        def _(_):
+            save_j7_offset(result_path, float(slider.value))
+            show(f'已保存（{datetime.now():%H:%M:%S}）')
+
+        @reload.on_click
+        def _(_):
+            slider.value = saved()
+            show('已恢复为文件里的值')
+
+        show()
+
     def show_joints(self, motor_positions):
-        """Show live raw motor angles, mapped with the calibration's compensation."""
+        """Show live raw motor angles, mapped with the calibration's compensation (J7 as the slider sets it)."""
         q = np.asarray(self.compensation.to_model(motor_positions), float)
         with self.lock:
+            self.live_motor = motor_positions
             self.live_q = q
             self.set_robot(q)
             self.joint_status.content = (f"关节（模型角，{datetime.now():%H:%M:%S}）：" +

@@ -21,7 +21,7 @@ from gx4m_real.camera.frame_ipc import receive, send                    # noqa: 
 from gx4m_real.robot.arm import ArmDriver                               # noqa: E402
 from gx4m_real.robot.config import load_config                          # noqa: E402
 from gx4m_real.robot.hand import HandDriver                             # noqa: E402
-from robot_panel import enabled_actions                                 # noqa: E402
+from robot_panel import enabled_actions, tactile_markdown                                # noqa: E402
 from tasks.dexlong_gear3.robot_server import RobotController, serve     # noqa: E402
 from tasks.dexlong_gear3.run_step1 import (CONTROL_CONFIG, MODEL, CameraToEnv, FixedGearPose,  # noqa: E402
                                            Step1Runner, arm_config, load_actor)
@@ -96,6 +96,29 @@ class ControllerTests(unittest.TestCase):
         s = self.run_action(c, 'disconnect_arm')
         self.assertEqual((s['arm']['connected'], s['q']), (False, {}))
 
+    def test_tactile_tare_and_status(self):
+        c = self.controller()
+        self.assertIn('触觉没有打开', self.run_action(c, 'tare_tactile')['message'])
+
+        class Tactile:
+            threshold_n = .3
+
+            def tare(self, duration):
+                return np.array([1., 2., 3., 4.])
+
+            def forces(self):
+                return np.array([0., .4, 0., 0.])
+
+        c.runner.tactile = Tactile()
+        status = self.run_action(c, 'tare_tactile')
+        self.assertIn('零点 1.0, 2.0, 3.0, 4.0 N', status['message'])
+        self.assertEqual((status['tactile'], status['tactile_threshold']), ([0., .4, 0., 0.], .3))
+        self.assertIn('tare_tactile', enabled_actions(status))
+        self.run_action(c, 'connect_hand')
+        message = self.run_action(c, 'hand_home', timeout=20.)['message']
+        self.assertIn('灵巧手已回到初始位置', message)
+        self.assertIn('触觉已去皮', message)        # the hand open at the start pose: a fresh zero
+
     def test_policy_needs_the_gear_at_the_start(self):
         c = self.controller(np.asarray(self.iface.ref['object_pos']) + [.03, 0, 0])
         self.run_action(c, 'connect_arm')
@@ -105,6 +128,16 @@ class ControllerTests(unittest.TestCase):
         message = self.run_action(c, 'run_policy')['message']
         self.assertIn('齿轮离训练起点 x +30', message)
         self.assertFalse(any(c.out.iterdir()))
+
+    def test_start_height_tolerance(self):
+        c = self.controller(np.asarray(self.iface.ref['object_pos']) + [0, 0, .015])
+        for action in ('connect_arm', 'connect_hand', 'arm_home', 'hand_home'):
+            self.run_action(c, action)
+        self.assertIn('z +15 mm（x、y 各 ±20 mm，z ±5 mm）', self.run_action(c, 'run_policy')['message'])
+        c.start_z_tolerance = .02           # --start-z-tolerance 0.02: the episode starts
+        c.submit('run_policy')
+        time.sleep(1.)                      # past the start checks, into the episode
+        self.assertIn('策略结束：已停止', self.run_action(c, 'stop', timeout=20.)['message'])
 
     def test_stop_interrupts_the_move_to_start(self):
         c = self.controller()
@@ -166,6 +199,16 @@ class PanelLogicTests(unittest.TestCase):
         self.assertEqual(enabled_actions(self.status(True, 'fault')), {'disconnect_arm', 'connect_hand'})
         self.assertEqual(enabled_actions(self.status(True, 'hold', True, busy='hand_home')), {'stop'})
         self.assertEqual(enabled_actions(self.status(True, 'hold', True, busy='connect_hand')), set())
+        self.assertIn('tare_tactile', enabled_actions(dict(self.status(), tactile=[0., .1, .2, .3])))
+        self.assertNotIn('tare_tactile', enabled_actions(dict(self.status(), tactile='PaXini reading too old')))
+        self.assertNotIn('tare_tactile', enabled_actions(dict(self.status(busy='run_policy'), tactile=[0.]*4)))
+
+    def test_tactile_markdown(self):
+        text = tactile_markdown(dict(self.status(), tactile=[.1, .5, 0., -.2], tactile_threshold=.3))
+        self.assertIn('| 食指 | +0.50 N | 🔴 是 |', text)
+        self.assertIn('| 拇指 | +0.10 N | 否 |', text)
+        self.assertIn('读取失败', tactile_markdown(dict(self.status(), tactile='timeout')))
+        self.assertIn('没有打开触觉', tactile_markdown(self.status()))
 
 
 if __name__ == '__main__':

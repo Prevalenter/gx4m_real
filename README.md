@@ -203,7 +203,14 @@ python tasks/dexlong_gear3/run_step1.py --step 2 --handeye apps/charuco_handeye/
 - 去皮后的法向力超过 `--tactile-threshold`（默认用参考配置的 `binary_tactile_threshold_n`，0.3 N）记为接触 1，否则为 0；
 - 原始计数按 0.1 N/计数换算，这个系数沿用 hora 部署里的值，没有自己标定过；
 - 任一传感器的读数超过 `--max-tactile-age`（默认 0.2 s）没有更新，就停止 episode，结果记为 `tactile_lost`，机械臂保持当前姿态；
-- 日志里每步记录 `contact` 和 `tactile_force`，控制台每秒打印一次接触状态，Viser 面板显示 4 指去皮后的力。
+- 日志里每步记录 `contact` 和 `tactile_force`，控制台每秒打印一次接触状态。
+- Viser 页面的“指尖触觉”栏（`perception/robot_panel.py`）：
+  - 4 指去皮后的力和接触状态表；
+  - 最近 10 s 的力曲线，带阈值线；
+  - 一个“触觉去皮”按钮，手指不碰东西时点，执行策略时不能用。
+  - 场景里每个指尖有一个小球，颜色和曲线一致，接触时变红变大。
+- 除了每个 episode 开始时，控制进程启动时、“灵巧手回初始位置”完成后（手张开、不碰东西）也会自动去皮，页面上显示的力从一开始就接近 0。
+- 齿轮起点高度默认要在训练起点 ±5 mm 以内才能开始策略。基座高度和真机不一致时这里会拦下（2026-11-05：训练侧新基座偏高约 14 mm，应约 0.872）。临时试跑可以用 `run_robot_server.sh ... --start-z-tolerance 0.02` 放宽，此时策略看到的齿轮高度是错的。
 
 `--no-tactile`（以及 `--mock`）把接触全给 0，此时策略基本无法成功。上机前先核对手指对应关系和阈值：运行 `python -m gx4m_real.robot.tactile`，它会先去皮 1 s，然后每 0.1 s 打印一次 4 指的力和接触状态，逐个按压手指检查。
 

@@ -436,8 +436,8 @@ def open_tactile(args, iface):
     from gx4m_real.robot.tactile import FingertipContacts
     threshold = args.tactile_threshold or iface.ref['binary_tactile_threshold_n']
     tactile = FingertipContacts.open(threshold_n=threshold)
-    try:
-        print(f'PaXini fingertips (thumb, index, middle, ring) now at {np.round(tactile.wait(), 2).tolist()} N, '
+    try:       # a first zero for the displayed forces; each episode tares again with the hand open at the start
+        print(f'PaXini fingertips (thumb, index, middle, ring) tared at {np.round(tactile.tare(.5), 2).tolist()} N, '
               f'contact above {threshold} N after the tare at each episode start')
     except Exception:
         tactile.close()

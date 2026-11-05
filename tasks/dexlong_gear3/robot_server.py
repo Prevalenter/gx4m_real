@@ -50,7 +50,9 @@ from tasks.dexlong_gear3.step1 import ESTIMATORS, MODELS, REFERENCES, Step1Inter
 KEY_PATH = Path(os.environ.get('XDG_RUNTIME_DIR') or tempfile.gettempdir())/'gx4m_step1_robot.key'
 ACTIONS = {'connect_arm': '连接机械臂', 'disconnect_arm': '断开机械臂', 'connect_hand': '连接灵巧手',
            'disconnect_hand': '断开灵巧手', 'release': '进入拖动模式', 'hold': '退出拖动模式',
-           'arm_home': '机械臂回初始位置', 'hand_home': '灵巧手回初始位置', 'run_policy': '执行策略', 'stop': '停止'}
+           'arm_home': '机械臂回初始位置', 'hand_home': '灵巧手回初始位置', 'run_policy': '执行策略', 'stop': '停止',
+           'tare_tactile': '触觉去皮'}
+START_Z_TOLERANCE = .005  # m: the gear lies flat on the table at the trained start height
 START_POSE_AGE = .3     # s: the policy starts only on a pose this fresh; once running, --max-pose-age applies
 OUTCOMES = {'success': '成功', 'stopped': '已停止', 'pose_lost': '齿轮位姿丢失', 'tracking_error': '机械臂跟不上目标',
             'max_steps': '达到最大步数', 'interrupted': '中断', 'tactile_lost': '触觉读数中断'}
@@ -59,8 +61,9 @@ OUTCOMES = {'success': '成功', 'stopped': '已停止', 'pose_lost': '齿轮位
 class RobotController:
     """Runs viewer actions on the runner's arm and hand; the hand is opened by connect_hand (hand_factory())."""
 
-    def __init__(self, runner, hand_factory, out, *, log=print):
+    def __init__(self, runner, hand_factory, out, *, start_z_tolerance=START_Z_TOLERANCE, log=print):
         self.runner, self.arm, self.hand_factory, self.out, self.log = runner, runner.arm, hand_factory, out, log
+        self.start_z_tolerance = start_z_tolerance
         self.iface = runner.iface
         runner.hand = None
         self.lock = threading.Lock()
@@ -130,6 +133,12 @@ class RobotController:
             self.runner.hand, self.hand_error = hand, None
         return '灵巧手已连接，保持当前位置'
 
+    def tare_tactile(self):
+        if self.runner.tactile is None:
+            raise RuntimeError('触觉没有打开')
+        offset = self.runner.tactile.tare(.5)
+        return '触觉已去皮，零点 ' + ', '.join(f'{f:.1f}' for f in offset) + ' N（拇指、食指、中指、无名指）'
+
     def disconnect_hand(self):
         hand, self.runner.hand = self.runner.hand, None
         if hand is not None:
@@ -163,6 +172,8 @@ class RobotController:
         if error.max() >= HAND_START_TOLERANCE:
             return (f'灵巧手没有完全到位：gx4m_joint{int(error.argmax()) + 1} 差 {np.degrees(error.max()):.1f}°'
                     '（目标已下发，可能被挡住）')
+        if self.runner.tactile is not None:     # open at the start pose, touching nothing: the episode's tare pose
+            return '灵巧手已回到初始位置；' + self.tare_tactile()
         return '灵巧手已回到初始位置'
 
     def run_policy(self):
@@ -181,9 +192,10 @@ class RobotController:
         if T is None or age > START_POSE_AGE:
             raise RuntimeError('没有齿轮位姿' if np.isinf(age) else f'齿轮位姿已过期（{age:.2f} s）')
         offset = T[:3, 3] - self.iface.ref['object_pos']
-        if np.abs(offset[:2]).max() > START_RANGE or abs(offset[2]) > .005:
+        if np.abs(offset[:2]).max() > START_RANGE or abs(offset[2]) > self.start_z_tolerance:
             raise RuntimeError(f'齿轮离训练起点 x {offset[0]*1000:+.0f}、y {offset[1]*1000:+.0f}、'
-                               f'z {offset[2]*1000:+.0f} mm（x、y 各 ±{START_RANGE*1000:.0f} mm，z ±5 mm）')
+                               f'z {offset[2]*1000:+.0f} mm（x、y 各 ±{START_RANGE*1000:.0f} mm，'
+                               f'z ±{self.start_z_tolerance*1000:.0f} mm）')
         self.log(f'Policy episode {self.episodes}: gear at {np.round(T[:3, 3], 3)}')
         outcome, rows = self.runner.episode()
         self.out.mkdir(parents=True, exist_ok=True)
@@ -203,13 +215,15 @@ class RobotController:
             q.update(zip(names[7:], np.asarray(hand.q, float).tolist()))
         with self.lock:
             busy, message = self.busy, self.message
-        tactile = None
+        tactile = threshold = None
         if self.runner.tactile is not None:
+            threshold = self.runner.tactile.threshold_n
             try:
                 tactile = np.round(self.runner.tactile.forces(), 2).tolist()   # N after the last tare, thumb first
             except RuntimeError as exc:
                 tactile = str(exc)
         return {'type': 'status', 'busy': busy, 'message': message, 'q': q, 'tactile': tactile,
+                'tactile_threshold': threshold,
                 'arm': {'connected': arm['connected'], 'mode': arm['mode'], 'error': arm['error'], 'mock': arm['mock']},
                 'hand': {'connected': hand is not None, 'error': self.hand_error},
                 'stage': self.iface.stage if busy == 'run_policy' else None,
@@ -278,6 +292,9 @@ def main(argv=None):
     parser.add_argument('--max-pose-age', type=float, default=1.,
                         help='s: tracking lost this long stops the policy (a start needs a pose under 0.3 s)')
     parser.add_argument('--max-tracking-error', type=float, default=.3)
+    parser.add_argument('--start-z-tolerance', type=float, default=START_Z_TOLERANCE,
+                        help='m: gear height off the trained start that still allows a policy start (a wrong base '
+                             'height shows up here; raising it only lets the policy run on the wrong height)')
     add_tactile_args(parser)
     parser.add_argument('--out', type=Path, help='Directory for episode logs (default: runs/step<n>_<time>)')
     args = parser.parse_args(argv)
@@ -297,7 +314,8 @@ def main(argv=None):
                          hand_approach_speed=args.hand_approach_speed)
     out = args.out or HERE/'runs'/datetime.now().strftime(f'step{args.step}_%Y%m%d_%H%M%S')
     controller = RobotController(
-        runner, lambda: HandDriver(args.hand_port, serial_number=args.hand_serial, mock=args.mock), out)
+        runner, lambda: HandDriver(args.hand_port, serial_number=args.hand_serial, mock=args.mock), out,
+        start_z_tolerance=args.start_z_tolerance)
     host, port = args.listen.rsplit(':', 1)
     key = write_key()
     print(f'Robot server on {host}:{port} (key {KEY_PATH}); arm PVT limit {config.velocity_limit:.2f} rad/s, '

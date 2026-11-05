@@ -6,11 +6,13 @@ robot to the measured joints while the arm or hand is connected (the reference p
 """
 from __future__ import annotations
 
+from collections import deque
 from multiprocessing.connection import AuthenticationError, Client
 import os
 from pathlib import Path
 import tempfile
 import threading
+import time
 
 import numpy as np
 
@@ -27,6 +29,13 @@ BUTTONS = (('connect_arm', '连接机械臂', None), ('disconnect_arm', '断开�
            ('stop', '停止（保持当前位置）', 'red'))
 MODES = {'disconnected': '未连接', 'hold': '保持位置', 'manual': '运动中', 'released': '拖动模式（已失能）',
          'fault': '故障', 'recording': '无力录制中', 'playback': '回放中'}
+# Sensor order of the server's tactile forces (gx4m_real/robot/tactile.py FINGERS) and the link whose mesh tip
+# marks each sensor in the scene: the distal links; the ring fingertip is gx4m_link17, fixed to gx4m_link16.
+FINGERS = ('拇指', '食指', '中指', '无名指')
+FINGERTIP_LINKS = ('gx4m_link4', 'gx4m_link8', 'gx4m_link12', 'gx4m_link17')
+FINGER_RGB = ((150, 80, 210), (40, 130, 240), (40, 180, 80), (240, 150, 20))     # plot lines and scene balls
+HISTORY_SEC = 10.
+CONTACT_RGB = (255, 20, 20)
 
 
 def enabled_actions(status):
@@ -37,6 +46,8 @@ def enabled_actions(status):
     if busy is not None:
         return {'stop'} if busy in ('arm_home', 'hand_home', 'run_policy') else set()
     actions = {'disconnect_arm'} if arm['connected'] else {'connect_arm'}
+    if isinstance(status.get('tactile'), list):
+        actions.add('tare_tactile')
     actions.add('disconnect_hand' if hand['connected'] else 'connect_hand')
     if hand['connected']:
         actions.add('hand_home')
@@ -59,16 +70,90 @@ def status_markdown(status):
     lines = [f'**机械臂**：{arm_text}', f'**灵巧手**：{hand_text}', f"**状态**：{status['message']}"]
     if status.get('stage') is not None:
         lines.append(f"**策略阶段**：{status['stage']}")
-    tactile = status.get('tactile')
-    if isinstance(tactile, str):
-        lines.append(f'**触觉**：读取失败：{tactile}')
-    elif tactile is not None:
-        names = ('拇指', '食指', '中指', '无名指')
-        lines.append('**触觉**（去皮后法向力）：' + '，'.join(f'{n} {f:+.1f} N' for n, f in zip(names, tactile)))
     lines.append(f'关节补偿（与手眼标定一致）：{offsets or "全为 0"}')
     if arm['connected'] or hand['connected']:
         lines.append('模型显示真机实时关节。')
     return '\n\n'.join(lines)
+
+
+def tactile_markdown(status):
+    tactile = None if status is None else status.get('tactile')
+    if status is None:
+        return '等待控制进程。'
+    if tactile is None:
+        return '控制进程没有打开触觉（`--no-tactile` 或 `--mock`）。'
+    if isinstance(tactile, str):
+        return f'**读取失败**：{tactile}'
+    threshold = status.get('tactile_threshold')
+    rows = ['| 手指 | 法向力 | 接触 |', '|---|---|---|']
+    rows += [f"| {n} | {f:+.2f} N | {'🔴 是' if threshold is not None and f > threshold else '否'} |"
+             for n, f in zip(FINGERS, tactile)]
+    note = f'去皮后的法向力，超过 {threshold:g} N 记为接触（策略的观测）。' if threshold is not None else ''
+    return '\n'.join(rows) + f'\n\n{note}每个 episode 开始时自动去皮；手指不碰东西时也可以点下面的按钮去皮。'
+
+
+class TactileView:
+    """Fingertip forces from the server status: a table, the last HISTORY_SEC s as a plot, and a ball at each
+    fingertip in the scene (the finger's plot colour, red and larger on contact)."""
+
+    def __init__(self, viewer, gui):
+        from viser import uplot         # not in the control environment, which imports enabled_actions from here
+
+        self.viewer = viewer
+        self.history = deque()
+        self.t0 = time.monotonic()
+        self.text = gui.add_markdown('等待控制进程。')
+        empty = np.zeros(0)
+        series = [uplot.Series(label='时间 s')]
+        series += [uplot.Series(label=n, stroke='#%02x%02x%02x' % c, width=2) for n, c in zip(FINGERS, FINGER_RGB)]
+        series.append(uplot.Series(label='阈值', stroke='#888888', dash=(6, 4), width=1))
+        self.plot = gui.add_uplot(data=(empty,)*6, series=tuple(series), title=f'法向力 N（最近 {HISTORY_SEC:g} s）',
+                                  scales={'x': uplot.Scale(time=False, auto=True), 'y': uplot.Scale(auto=True)},
+                                  aspect=1.6)
+        self.centres = []
+        model = viewer.model
+        for link in FINGERTIP_LINKS:
+            geometry = [model.scene.geometry[model.scene.graph.get(node)[1]]
+                        for node in model.scene.graph.nodes_geometry
+                        if model.scene.graph.transforms.parents.get(node) == link]
+            if geometry:        # the far end along +x (the finger's length), so the ball sticks out of the mesh
+                mesh = geometry[0]
+                self.centres.append(np.array([mesh.bounds[1, 0], *mesh.centroid[1:]]))
+            else:
+                self.centres.append(np.zeros(3))
+        self.balls = [viewer.server.scene.add_icosphere(f'/robot/tactile_{i}', radius=.008, color=color, visible=False)
+                      for i, color in enumerate(FINGER_RGB)]
+
+    def show(self, status):
+        content = tactile_markdown(status)
+        if self.text.content != content:
+            self.text.content = content
+        tactile = None if status is None else status.get('tactile')
+        threshold = None if status is None else status.get('tactile_threshold')
+        live = isinstance(tactile, list)
+        now = time.monotonic() - self.t0
+        if live:
+            self.history.append((now, tactile))
+        while self.history and self.history[0][0] < now - HISTORY_SEC:
+            self.history.popleft()
+        if self.history:
+            t = np.array([h[0] for h in self.history]) - now
+            forces = np.array([h[1] for h in self.history], float).T
+            limit = np.full_like(t, np.nan if threshold is None else threshold)
+            self.plot.data = (t, *forces, limit)
+        with self.viewer.lock:
+            model = self.viewer.model
+            for i, (ball, link) in enumerate(zip(self.balls, FINGERTIP_LINKS)):
+                if not live:
+                    ball.visible = False
+                    continue
+                T = model.get_transform(link, model.base_link)
+                ball.position = T[:3, :3] @ self.centres[i] + T[:3, 3]
+                force = tactile[i]
+                contact = threshold is not None and force > threshold
+                ball.color = CONTACT_RGB if contact else FINGER_RGB[i]
+                ball.radius = float(np.clip(.008 + .005*max(force, 0.), .014 if contact else .008, .025))
+                ball.visible = True
 
 
 class RobotPanel:
@@ -87,6 +172,11 @@ class RobotPanel:
                 button = gui.add_button(label, color=color, disabled=True)
                 button.on_click(lambda _, a=action: self.send(a))
                 self.buttons[action] = button
+        with gui.add_folder('指尖触觉'):
+            self.tactile = TactileView(viewer, gui)
+            button = gui.add_button('触觉去皮（手指不碰任何东西时点）', disabled=True)
+            button.on_click(lambda _: self.send('tare_tactile'))
+            self.buttons['tare_tactile'] = button
         self.thread = threading.Thread(target=self._run, daemon=True, name='robot-panel')
         self.thread.start()
 
@@ -134,8 +224,13 @@ class RobotPanel:
         if self.summary.content != content:
             self.summary.content = content
         measured = {} if status is None else status['q']
-        if not measured and not self.live:
-            return                      # reference pose, which the sliders may have changed
+        if measured or self.live:
+            self._move_robot(measured)
+        self.tactile.show(status)
+
+    def _move_robot(self, measured):
+        """The measured joints over the reference pose; back to the reference (which the sliders may have changed)
+        when nothing is measured any more."""
         names = self.viewer.model.actuated_joint_names
         with self.viewer.lock:
             if not self.live:

@@ -103,11 +103,14 @@ class TactileView:
         self.history = deque()
         self.t0 = time.monotonic()
         self.text = gui.add_markdown('等待控制进程。')
-        empty = np.zeros(0)
+        # Start with a flat 10 s of zeros: a plot created empty can stay blank in a page already open when the
+        # first data arrives (no scales until a reload).
+        start = np.array([-HISTORY_SEC, 0.])
         series = [uplot.Series(label='时间 s')]
         series += [uplot.Series(label=n, stroke='#%02x%02x%02x' % c, width=2) for n, c in zip(FINGERS, FINGER_RGB)]
         series.append(uplot.Series(label='阈值', stroke='#888888', dash=(6, 4), width=1))
-        self.plot = gui.add_uplot(data=(empty,)*6, series=tuple(series), title=f'法向力 N（最近 {HISTORY_SEC:g} s）',
+        self.plot = gui.add_uplot(data=(start, *[np.zeros(2)]*5), series=tuple(series),
+                                  title=f'法向力 N（最近 {HISTORY_SEC:g} s）',
                                   scales={'x': uplot.Scale(time=False, auto=True), 'y': uplot.Scale(auto=True)},
                                   aspect=1.6)
         self.centres = []

@@ -200,7 +200,10 @@ URDF 按参考配置的 `robot_urdf` 选（`step1.reference_urdf`，Viser 页面
   - 网格：`asset/fabrica_beam_3x/beam2_visual.obj`，就是仿真横梁的 visual 网格，原点和坐标轴与仿真一致。
   - 颜色：和 gear36 一样用蓝色 HSV 范围，所以 gear36 不能同时在画面里。
 - **两端歧义**：横梁接近长方体，转 180° 外形几乎一样。处理方法：
-  - 在横梁 **+x 端贴一块黄色纸**。Viser 摆放检查页面里，起点模型上的黄点就是这一端。
+  - 在横梁 **+x 端贴一块黄色纸**：把这一端约 4 cm 长的窄榫头的顶面、朝相机的侧面和端面用黄纸包起来，摆放时这一端朝世界 -x（朝接收件、朝相机）。Viser 摆放检查页面里，起点模型上的黄点就是这一端。图示见 `tasks/dexlong_gear3/perception/beam_end_marker.png`：
+
+    ![横梁黄纸位置](tasks/dexlong_gear3/perception/beam_end_marker.png)
+
   - 配准后，`gear_tracker` 在横梁附近找黄色像素，取让 +x 端落在色纸处的那个解。
   - 找不到色纸时，取最接近训练起点朝向的解（`reference_in_camera`）。
   - `live_gear36.py --end-marker` 可以换颜色，`none` 表示不用色纸。

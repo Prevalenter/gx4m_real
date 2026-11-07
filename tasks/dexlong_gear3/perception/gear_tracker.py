@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from detect_gear36 import color_gear_mask
+from gears import marked_symmetric, marker_point, nearest_symmetric
 
 OCCLUSION_MARGIN = .01      # m: observed depth this much nearer than the rendered gear is something in front of it
 OCCLUSION_RING_PX = 15      # around the silhouette, pixels nearer than the gear's nearest point are occluders too
@@ -53,11 +54,20 @@ class GearTracker:
     Upside down: the gear disc is symmetric about its mid-plane and the hub is a small part of the gear (4% of the
     gear48 disc), so a registration with the hub pointing into the table renders and scores almost like the right
     one. With up_in_camera (world +z in the camera frame) a registration whose hub points down is turned over
-    (hub_up) before it is checked and tracked; tracking only refines and does not turn the gear over again."""
+    (hub_up) before it is checked and tracked; tracking only refines and does not turn the gear over again.
+
+    A beam (reference_in_camera: the trained start orientation in the camera frame) instead keeps, of its box
+    symmetries (symmetry), the registration nearest that orientation, so the policy sees the beam the way it lay in
+    training whichever end the registration picked. With the end marker (marker_ranges: HSV ranges of the paper on
+    the beam's marked end, marker_end: that end in the mesh frame) the registration that puts the marked end at the
+    seen paper wins; the reference orientation only decides when the paper is not seen (marker_misses counts those)."""
+    reference_in_camera = None
+    marker_ranges = marker_end = None
+    MARKER_SEARCH_PX = 25       # the paper is looked for this far around the beam's color mask
 
     def __init__(self, mesh, symmetry, ranges, *, scorer, refiner, glctx, debug_dir,
                  register_iterations=5, track_iterations=2, min_iou=.45, max_depth_error=.02, min_visible=.25,
-                 up_in_camera=None):
+                 up_in_camera=None, reference_in_camera=None, marker_ranges=None, marker_end=None):
         import torch
         from estimater import FoundationPose
         from Utils import draw_posed_3d_box, draw_xyz_axis, nvdiffrast_render
@@ -69,6 +79,9 @@ class GearTracker:
         self.register_iterations, self.track_iterations = register_iterations, track_iterations
         self.min_iou, self.max_depth_error, self.min_visible = min_iou, max_depth_error, min_visible
         self.up_in_camera = None if up_in_camera is None else np.asarray(up_in_camera, float)
+        self.reference_in_camera = None if reference_in_camera is None else np.asarray(reference_in_camera, float)
+        self.marker_ranges, self.marker_end = marker_ranges, None if marker_end is None else np.asarray(marker_end, float)
+        self.marker_misses = 0      # beam registrations without the end marker in view
         self.flips = 0              # registrations turned over by hub_up
         self.estimator = None
         self.bad_frames = 0
@@ -92,10 +105,32 @@ class GearTracker:
             self.reset()
             return None
 
-    def keep_hub_up(self, estimator, pose):
+    def seen_marker(self, frame, mask):
+        """Camera-frame point of the end marker near the beam mask, or None."""
+        import cv2
+        size = 2*self.MARKER_SEARCH_PX + 1
+        near = cv2.dilate(mask.astype(np.uint8), np.ones((size, size), np.uint8)) > 0
+        return marker_point(frame.rgb, frame.depth, frame.K, near, self.marker_ranges)
+
+    def keep_hub_up(self, estimator, pose, frame=None, mask=None):
         """hub_up for a registered pose; a turned-over pose also replaces the estimator's pose_last (the centered
-        mesh pose that track_one refines from)."""
-        upright = hub_up(pose, self.up_in_camera)
+        mesh pose that track_one refines from). For a beam: the marked end at the seen marker (frame, mask), else
+        the turn nearest reference_in_camera."""
+        marked = None
+        if self.marker_ranges is not None and frame is not None and mask is not None:
+            marker = self.seen_marker(frame, mask)
+            marked = None if marker is None else marked_symmetric(pose, self.symmetry, self.marker_end, marker)
+            self.marker_misses += marked is None
+        if marked is not None:
+            upright = marked
+            if np.allclose(upright, pose):
+                return pose
+        elif self.reference_in_camera is not None:
+            upright = nearest_symmetric(pose, self.symmetry, self.reference_in_camera)
+            if np.allclose(upright, pose):
+                return pose
+        else:
+            upright = hub_up(pose, self.up_in_camera)
         if upright is pose:
             return pose
         to_centered = estimator.get_tf_to_centered_mesh().cpu().numpy()
@@ -126,7 +161,7 @@ class GearTracker:
             if estimator.pose_last is None:
                 pose = None
             else:
-                pose = self.keep_hub_up(estimator, pose)
+                pose = self.keep_hub_up(estimator, pose, frame, mask)
         else:
             depth = frame.depth
             if self.last_render is not None and self.last_render.shape == depth.shape:

@@ -14,7 +14,7 @@ import viser
 from viser.extras import ViserUrdf
 import yourdfpy
 
-from gears import DEFAULT_GEAR, DISPLAY_RGB, GEAR_COLORS, GEARS, check_gear_mesh, gear_mesh_path
+from gears import DEFAULT_GEAR, DISPLAY_RGB, GEAR_COLORS, PARTS, check_gear_mesh, gear_mesh_path, symmetry_note
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
@@ -215,7 +215,7 @@ class SceneViewer:
                 f"相机世界位置：{self.T_world_cam[:3, 3].round(4).tolist()} m\n\n"
                 f"零件世界位置：{world[:3, 3].round(4).tolist()} m\n\n"
                 f"零件世界四元数 wxyz：{Rotation.from_matrix(world[:3, :3]).as_quat()[[3, 0, 1, 2]].round(5).tolist()}\n\n"
-                f'齿轮模型原点即仿真齿轮原点；偏航每 {360 / GEARS[self.gear_name][0]:.0f}° 等价。')
+                + symmetry_note(self.gear_name))
 
     def expire(self, now=None):
         with self.lock:
@@ -244,7 +244,7 @@ def main():
     parser.add_argument('--initial-pose', type=Path, default=DEFAULT_INITIAL)
     parser.add_argument('--joints', type=Path, help='Reference joint pose JSON (radians); never commands hardware')
     parser.add_argument('--urdf', type=Path, default=DEFAULT_URDF)
-    parser.add_argument('--gear', choices=sorted(GEARS), default=DEFAULT_GEAR)
+    parser.add_argument('--gear', choices=PARTS, default=DEFAULT_GEAR)
     parser.add_argument('--mesh', type=Path, help='Default: the simulation CAD mesh of --gear')
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8088)

@@ -23,6 +23,14 @@ hand, so the policy acts on a learned estimate (pose_estimator.py) instead of th
 also takes whether the tracked pose is current (valid), how old it is (age, s) and the tared pad forces (4, 3) N as
 (normal into the pad, distal, lateral); object_pos/object_axis are the last tracked pose, held while lost.
 estimated_pose() gives the estimate in the env frame for the stage logic while the camera has lost the gear.
+
+Beam lift (key 'beam1', gx4m_learning dexlong_beam_lift step 1: grasp Beam part 2 and lift it 20 cm): the beam has no
+symmetry axis, so the policy and estimator carry its full orientation as two body axes (reference['object_axes'], x
+then z; the object_frame field) and the goal keeps the exact start orientation (goal_yaw_symmetry 0, not yaw-free).
+A reference with a lift block (export ... --task beam_lift) has a single goal, the start pose raised by
+lift['height']: reset(object_pose=...) puts it above the measured start, its first hit (success_steps near it) is
+the success, and a drop (lifted drop_min_rise, then drop_fall lower relative to the palm than at its highest) ends
+the episode as 'drop'. No insert or withdrawal stage.
 """
 from __future__ import annotations
 
@@ -32,14 +40,24 @@ from pathlib import Path
 
 import numpy as np
 
-from gx4m_real.robot.kinematics import UrdfFK, quat_matrix
+from gx4m_real.robot.kinematics import UrdfFK, matrix_quat, quat_matrix
 
 HERE = Path(__file__).resolve().parent
 # Deployed policy per split step and the reference exported with it.
-REFERENCES = {1: HERE/'config'/'step1_reference.json', 2: HERE/'config'/'step2_reference.json'}
-MODELS = {1: HERE/'models'/'step1_lstm_20261103_iter4750.pt', 2: HERE/'models'/'step2_lstm_20261105_iter4500.pt'}
+REFERENCES = {1: HERE/'config'/'step1_reference.json', 2: HERE/'config'/'step2_reference.json',
+              'beam1': HERE/'config'/'beam1_reference.json'}
+MODELS = {1: HERE/'models'/'step1_lstm_20261103_iter4750.pt', 2: HERE/'models'/'step2_lstm_20261105_iter4500.pt',
+          'beam1': HERE/'models'/'beam1_lstm_20261107_iter8000.pt'}
 # Gear pose estimator saved with each occlusion-aware policy (reference['pose_estimator']).
-ESTIMATORS = {2: HERE/'models'/'step2_estimator_20261105_iter4500.pt'}
+ESTIMATORS = {2: HERE/'models'/'step2_estimator_20261105_iter4500.pt',
+              'beam1': HERE/'models'/'beam1_estimator_20261107_iter8000.pt'}
+# Part each step's perception tracks (perception/gears.py).
+PARTS = {1: 'gear24', 2: 'gear48', 'beam1': 'beam2'}
+
+
+def step_key(value):
+    """--step argument: a split step number or a named task ('beam1')."""
+    return int(value) if str(value).isdigit() else str(value)
 REFERENCE = REFERENCES[1]
 URDF = HERE.parents[1]/'asset/gx7_right/urdf/gx7_right_gx4m_cam_xl330_pad.urdf'
 
@@ -50,6 +68,24 @@ def reference_urdf(reference):
     name = str(reference.get('robot_urdf', '')).replace('\\', '/').rsplit('/', 1)[-1]
     path = URDF.parent/name
     return path if name and path.exists() else URDF
+
+
+def start_check(reference, pos, quat, z_tolerance=.005):
+    """(ok, message in Chinese) for an object pose against the trained start. The gears started anywhere within
+    +-2 cm in x and y at any yaw (reset_position_noise, randomized yaw); lift references started at one fixed pose,
+    so the beam must lie within +-1 cm and 10 deg of it (a guess: the policy never saw another start)."""
+    fixed = reference.get('lift') is not None
+    xy, angle_limit = (.01, 10.) if fixed else (.02, None)
+    offset = np.asarray(pos, dtype=np.float64) - reference['object_pos']
+    text = (f"x {offset[0]*1000:+.0f}、y {offset[1]*1000:+.0f}、z {offset[2]*1000:+.0f} mm"
+            f"（x、y 各 ±{xy*1000:.0f} mm，z ±{z_tolerance*1000:.0f} mm")
+    ok = np.abs(offset[:2]).max() <= xy and abs(offset[2]) <= z_tolerance
+    if angle_limit is not None:
+        R = quat_matrix(np.asarray(reference['object_quat'], dtype=np.float64)).T @ quat_matrix(np.asarray(quat, dtype=np.float64))
+        angle = float(np.degrees(np.arccos(np.clip((np.trace(R) - 1)/2, -1., 1.))))
+        text += f"；朝向差 {angle:.1f}°，要求 ≤ {angle_limit:.0f}°"
+        ok = ok and angle <= angle_limit
+    return bool(ok), f'离训练起点 {text}）'
 
 
 def load_reference(path=REFERENCE):
@@ -99,7 +135,11 @@ class Step1Interface:
         self.arm_smoothing = r.get('arm_moving_average', self.smoothing)
         self.clip = r['clamp_abs_observations']
         self.p2p = r['p2p']
-        self.teeth = None if r.get('yaw_free_goal') else r['goal_yaw_symmetry']
+        # Goal yaw: turned with the object (yaw-free), snapped to whole teeth, or exact (no symmetry, the beam).
+        self.yaw_free, self.teeth = bool(r.get('yaw_free_goal')), int(r['goal_yaw_symmetry'] or 0)
+        # Body axes of the policy's object pose field: the gear's z (object_axis) or the beam's x and z (object_frame).
+        self.object_axes = np.array(r.get('object_axes', [[0., 0., 1.]]), dtype=np.float64)
+        self.lift = r.get('lift')
         # Isaac's palm_rot is PhysX's link quaternion, continuous in q and with w ~ 0.2 at the start pose (it
         # crosses w = 0 during the task, so a w >= 0 quaternion would flip the observation's sign there).
         start = dict(zip(self.joint_order, r['initial_joint_pos']))
@@ -117,14 +157,26 @@ class Step1Interface:
             if estimator is None:
                 raise ValueError('This reference needs the pose estimator weights (estimator=...)')
             pe = r['pose_estimator']
-            self.estimator = PoseEstimator(estimator, pe['inputs'], pe['hidden'])
+            if pe.get('axes', 1) != len(self.object_axes):
+                raise ValueError(f"Estimator of {pe.get('axes', 1)} axes for a policy of {len(self.object_axes)}")
+            self.estimator = PoseEstimator(estimator, pe['inputs'], pe['hidden'], pe.get('axes', 1))
         self.reset()
 
-    def reset(self, targets=None):
+    def reset(self, targets=None, object_pose=None):
         """Start an episode in stage 0. targets: the joint targets the robot holds now (default: the
-        reference initial pose, where every episode must start)."""
+        reference initial pose, where every episode must start). object_pose: (position, wxyz) of the object at
+        rest at the start; with a lift reference the goal is that pose raised by lift['height'], at the trained
+        start height plus lift['height'] (default: the reference start)."""
         self.targets = np.array(self.ref['initial_joint_pos'] if targets is None else targets, dtype=np.float64)
         self.stage, self.near_steps, self.stage_steps, self.retracted = 0, 0, 0, False
+        if self.lift is not None:
+            r = self.ref
+            pos, quat = (r['object_pos'], r['object_quat']) if object_pose is None else object_pose
+            goal = np.array(pos, dtype=np.float64)
+            goal[2] = r['object_pos'][2] + self.lift['height']   # the trained goal height (the start check holds z)
+            self.goals = [(goal, np.array(quat, dtype=np.float64))]*2
+            self.start_z = float(r['object_pos'][2])
+            self.peak = None                       # (highest rise, object height above the palm then)
         if self.estimator is not None:
             self.estimator.reset()                 # fresh hidden state, as at an Isaac episode start
             self.estimate = None
@@ -145,14 +197,15 @@ class Step1Interface:
         return palm, self.palm_sign*self.fk.link_quats(joints)[self.palm_body], tips
 
     def observation(self, q, object_pos, object_axis, contact, valid=True, age=0., pad_force=None):
-        """q: measured joint positions (23,) rad; object_pos: gear origin (3,); object_axis: gear +z axis (3,),
-        both in the env frame; contact: 0/1 object contact per finger (4,). With the pose estimator: object_pos and
-        object_axis are the last tracked pose, valid whether it is from this step, age the seconds since it was
-        current, pad_force the tared pad forces (4, 3) N (normal, distal, lateral)."""
+        """q: measured joint positions (23,) rad; object_pos: gear origin (3,); object_axis: gear +z axis (3,) or the
+        object rotation matrix (3, 3) (needed for the beam's object_frame), both in the env frame; contact: 0/1 object
+        contact per finger (4,). With the pose estimator: object_pos and object_axis are the last tracked pose, valid
+        whether it is from this step, age the seconds since it was current, pad_force the tared pad forces (4, 3) N
+        (normal, distal, lateral)."""
         q = np.asarray(q, dtype=np.float64)
         palm, palm_quat, tips = self.palm_and_tips(q)
         object_pos = np.asarray(object_pos, dtype=np.float64)
-        axis = np.asarray(object_axis, dtype=np.float64)
+        axes = self.world_axes(object_axis)
         values = dict(
             joint_pos=2*(q - self.lower)/(self.upper - self.lower) - 1,
             prev_action_targets=self.targets,
@@ -161,39 +214,55 @@ class Step1Interface:
             fingertip_pos_rel_palm=(tips - palm).ravel(),
             object_pos_rel_palm=object_pos - palm,
             object_pos_rel_goal=object_pos - self.goal[0],
-            object_axis=axis/np.linalg.norm(axis),
+            object_axis=axes[-1],
+            object_frame=axes.ravel(),
             fingertip_object_contact=np.asarray(contact, dtype=np.float64),
         )
         if self.estimator is not None:
-            values.update(self._estimate(values, palm, palm_quat, tips, object_pos, axis, valid, age, pad_force))
+            values.update(self._estimate(values, palm, palm_quat, tips, object_pos, axes, valid, age, pad_force))
         missing = [n for n, _ in self.fields if n not in values]
         if missing:
             raise ValueError(f'Reference asks for observation fields this interface does not build: {missing}')
         obs = np.concatenate([np.ravel(values[n]) for n, _ in self.fields])
         return np.clip(obs, -self.clip, self.clip)
 
-    def _estimate(self, values, palm, palm_quat, tips, object_pos, axis, valid, age, pad_force):
+    def world_axes(self, object_axis):
+        """Unit object axes (n, 3) in the env frame, as reference['object_axes'], from a rotation matrix or a +z axis."""
+        a = np.asarray(object_axis, dtype=np.float64)
+        if a.ndim == 2:
+            return self.object_axes @ a.T
+        if not np.array_equal(self.object_axes, [[0., 0., 1.]]):
+            raise ValueError('This reference needs the object rotation matrix, not its axis')
+        return (a/np.linalg.norm(a))[None]
+
+    def _estimate(self, values, palm, palm_quat, tips, object_pos, axes, valid, age, pad_force):
         """Gear pose fields of the observation from the estimator (gx4m_learning split_env._estimate)."""
         pe = self.ref['pose_estimator']
         R = quat_matrix(palm_quat/np.linalg.norm(palm_quat))
         scale = pe['position_scale']
         force = np.zeros((4, 3)) if pad_force is None else np.asarray(pad_force, dtype=np.float64)
         x = np.concatenate((values['joint_pos'], self.targets, values['palm_rot'], ((tips - palm) @ R).ravel()*scale,
-                            R.T @ (object_pos - palm)*scale, R.T @ (axis/np.linalg.norm(axis)), [float(valid)],
+                            R.T @ (object_pos - palm)*scale, (axes @ R).ravel(), [float(valid)],
                             [min(age/pe['max_age_s'], 1.)], force.ravel()/pe['tactile_force_scale']))
         pos, est_axis, log_std = self.estimator.step(x)
         rel = R @ pos/scale
-        world_axis = R @ est_axis
+        world_axis = (est_axis.reshape(-1, 3) @ R.T).ravel()
         self.estimate = (palm + rel, world_axis, log_std)
-        return dict(object_pos_rel_palm=rel, object_pos_rel_goal=palm + rel - self.goal[0], object_axis=world_axis,
-                    object_pose_std=log_std)
+        return dict(object_pos_rel_palm=rel, object_pos_rel_goal=palm + rel - self.goal[0], object_axis=world_axis[-3:],
+                    object_frame=world_axis, object_pose_std=log_std)
 
     def estimated_pose(self):
         """The last estimate in the env frame: gear origin (3,) and a wxyz quaternion with the estimated axis as +z
-        (yaw arbitrary, which the yaw-free goal ignores); None before the first observation."""
+        (yaw arbitrary, which the yaw-free goal ignores), or with two estimated axes (x, z) the full orientation;
+        None before the first observation."""
         if self.estimate is None:
             return None
         pos, axis = self.estimate[:2]
+        if len(axis) == 6:
+            x, z = axis[:3], axis[3:]/np.linalg.norm(axis[3:])
+            x = x - (x @ z)*z
+            x = x/np.linalg.norm(x)
+            return pos, matrix_quat(np.stack((x, np.cross(z, x), z), axis=1))
         z = np.array([0., 0., 1.])
         c, v = float(z @ axis), np.cross(z, axis)
         quat = np.array([1. + c, *v])
@@ -223,15 +292,16 @@ class Step1Interface:
         pos = pos.copy()
         if self.ref['preinsert_accepts_lower'] and self.stage == 0:
             pos[2] = min(pos[2], object_pos[2])
-        quat = goal_quat(quat, object_quat, self.teeth)
+        if self.yaw_free or self.teeth:
+            quat = goal_quat(quat, object_quat, None if self.yaw_free else self.teeth)
         a = object_pos + self.reward_offsets @ quat_matrix(object_quat).T
         b = pos + self.reward_offsets @ quat_matrix(quat).T
         return float(np.linalg.norm(a - b, axis=-1).max())
 
     def update(self, q, object_pos, object_quat):
         """Stage logic after a control step, from the measured state (as Isaac's p2p step). Returns a dict with
-        outcome None (continue), 'success', 'fall', 'hand_far' or 'timeout' (per-stage step budget), and stage,
-        distance (m), away (closest fingertip to the grasp point, m)."""
+        outcome None (continue), 'success', 'fall', 'hand_far', 'drop' (lift references) or 'timeout' (per-stage
+        step budget), and stage, distance (m), away (closest fingertip to the grasp point, m)."""
         p = self.p2p
         was_retract = self.stage == 2
         distance = self.keypoint_distance(object_pos, object_quat)
@@ -249,9 +319,18 @@ class Step1Interface:
         if goal_hit:
             self.stage += 1
             self.near_steps, self.stage_steps = 0, 0
+        dropped = False
+        if self.lift is not None:
+            self.retracted |= goal_hit            # the lift goal held: success (gx4m_learning Step0Env)
+            palm, _, _ = self.palm_and_tips(q)
+            rise, in_hand = float(object_pos[2]) - self.start_z, float(object_pos[2] - palm[2])
+            if self.peak is None or rise > self.peak[0]:
+                self.peak = (rise, in_hand)
+            if self.lift.get('drop_min_rise') is not None:
+                dropped = self.peak[0] >= self.lift['drop_min_rise'] and in_hand < self.peak[1] - self.lift['drop_fall']
         fall = object_pos[2] < p['fall_height']
         hand_far = reach.max() > p['hand_far_distance'] and self.stage != 2
         timeout = self.stage_steps >= p['episode_steps']
-        outcome = ('success' if self.retracted else 'fall' if fall else 'hand_far' if hand_far
+        outcome = ('success' if self.retracted else 'fall' if fall else 'drop' if dropped else 'hand_far' if hand_far
                    else 'timeout' if timeout else None)
         return dict(outcome=outcome, stage=self.stage, distance=distance, away=float(away))

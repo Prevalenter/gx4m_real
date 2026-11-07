@@ -126,7 +126,7 @@ class ControllerTests(unittest.TestCase):
         self.run_action(c, 'arm_home')
         self.run_action(c, 'hand_home')
         message = self.run_action(c, 'run_policy')['message']
-        self.assertIn('齿轮离训练起点 x +30', message)
+        self.assertIn('物体离训练起点 x +30', message)
         self.assertFalse(any(c.out.iterdir()))
 
     def test_start_height_tolerance(self):

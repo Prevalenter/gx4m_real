@@ -41,10 +41,12 @@ sys.path.insert(0, str(ROOT))
 from gx4m_real.camera.frame_ipc import receive, send            # noqa: E402
 from gx4m_real.robot.arm import ArmDriver                       # noqa: E402
 from gx4m_real.robot.hand import HandDriver                     # noqa: E402
-from tasks.dexlong_gear3.run_step1 import (CONTROL_CONFIG, HAND_START_TOLERANCE, START_RANGE,  # noqa: E402
+from gx4m_real.robot.kinematics import matrix_quat               # noqa: E402
+from tasks.dexlong_gear3.run_step1 import (CONTROL_CONFIG, HAND_START_TOLERANCE,  # noqa: E402
                                            CameraToEnv, Step1Runner, UdpGearPose, add_tactile_args, arm_config,
                                            load_actor, open_tactile, save_episode)
-from tasks.dexlong_gear3.step1 import ESTIMATORS, MODELS, REFERENCES, Step1Interface, load_reference  # noqa: E402
+from tasks.dexlong_gear3.step1 import (ESTIMATORS, MODELS, REFERENCES, Step1Interface, load_reference,  # noqa: E402
+                                       start_check, step_key)
 
 # Same expression in perception/robot_panel.py (other environment, no shared import).
 KEY_PATH = Path(os.environ.get('XDG_RUNTIME_DIR') or tempfile.gettempdir())/'gx4m_step1_robot.key'
@@ -55,7 +57,8 @@ ACTIONS = {'connect_arm': '连接机械臂', 'disconnect_arm': '断开机械臂'
 START_Z_TOLERANCE = .005  # m: the gear lies flat on the table at the trained start height
 START_POSE_AGE = .3     # s: the policy starts only on a pose this fresh; once running, --max-pose-age applies
 OUTCOMES = {'success': '成功', 'stopped': '已停止', 'pose_lost': '齿轮位姿丢失', 'tracking_error': '机械臂跟不上目标',
-            'max_steps': '达到最大步数', 'interrupted': '中断', 'tactile_lost': '触觉读数中断'}
+            'max_steps': '达到最大步数', 'interrupted': '中断', 'tactile_lost': '触觉读数中断', 'drop': '物体从手里掉落',
+            'fall': '物体掉到桌面以下', 'hand_far': '手离物体太远', 'timeout': '超时'}
 
 
 class RobotController:
@@ -191,11 +194,9 @@ class RobotController:
         T, age = self.runner.gear_pose(q)
         if T is None or age > START_POSE_AGE:
             raise RuntimeError('没有齿轮位姿' if np.isinf(age) else f'齿轮位姿已过期（{age:.2f} s）')
-        offset = T[:3, 3] - self.iface.ref['object_pos']
-        if np.abs(offset[:2]).max() > START_RANGE or abs(offset[2]) > self.start_z_tolerance:
-            raise RuntimeError(f'齿轮离训练起点 x {offset[0]*1000:+.0f}、y {offset[1]*1000:+.0f}、'
-                               f'z {offset[2]*1000:+.0f} mm（x、y 各 ±{START_RANGE*1000:.0f} mm，'
-                               f'z ±{self.start_z_tolerance*1000:.0f} mm）')
+        ok, message = start_check(self.iface.ref, T[:3, 3], matrix_quat(T[:3, :3]), self.start_z_tolerance)
+        if not ok:
+            raise RuntimeError(f'物体{message}')
         self.log(f'Policy episode {self.episodes}: gear at {np.round(T[:3, 3], 3)}')
         outcome, rows = self.runner.episode()
         self.out.mkdir(parents=True, exist_ok=True)
@@ -276,8 +277,8 @@ def write_key(path=KEY_PATH):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--handeye', type=Path, help='handeye_result.json (required without --mock)')
-    parser.add_argument('--step', type=int, choices=sorted(REFERENCES), default=1,
-                        help='Split step; start step1_setup.py with the same --step')
+    parser.add_argument('--step', type=step_key, choices=list(REFERENCES), default=1,
+                        help='Split step 1 or 2, or beam1 (Beam part 2 lift); start step1_setup.py with the same --step')
     parser.add_argument('--model', type=Path, help="Default: the step's deployed model")
     parser.add_argument('--config', type=Path, default=CONTROL_CONFIG, help='Arm config (CAN, limits)')
     parser.add_argument('--hand-port')
@@ -312,7 +313,7 @@ def main(argv=None):
                          max_pose_age=args.max_pose_age, max_tactile_age=args.max_tactile_age,
                          max_tracking_error=args.max_tracking_error, approach_speed=args.approach_speed,
                          hand_approach_speed=args.hand_approach_speed)
-    out = args.out or HERE/'runs'/datetime.now().strftime(f'step{args.step}_%Y%m%d_%H%M%S')
+    out = args.out or HERE/'runs'/datetime.now().strftime(f'step{args.step}_%Y%m%d_%H%M%S'.replace('stepbeam', 'beam'))
     controller = RobotController(
         runner, lambda: HandDriver(args.hand_port, serial_number=args.hand_serial, mock=args.mock), out,
         start_z_tolerance=args.start_z_tolerance)

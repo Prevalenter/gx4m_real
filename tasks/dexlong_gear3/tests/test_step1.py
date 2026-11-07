@@ -168,8 +168,9 @@ class Step2EstimatorRolloutTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.rollout = dict(np.load(HERE/'data'/f'step{cls.STEP}_isaac_rollout.npz'))
-        cls.reference = load_reference(HERE/'data'/f'step{cls.STEP}_isaac_reference.json')
+        data = cls.STEP if isinstance(cls.STEP, str) else f'step{cls.STEP}'        # 'beam1' for the beam lift
+        cls.rollout = dict(np.load(HERE/'data'/f'{data}_isaac_rollout.npz'))
+        cls.reference = load_reference(HERE/'data'/f'{data}_isaac_reference.json')
         cls.cols = slices(list(cls.reference['policy_fields'].items()))
 
     def interface(self):
@@ -258,6 +259,107 @@ class Step2EstimatorRolloutTests(unittest.TestCase):
         pos, quat = iface.estimated_pose()
         np.testing.assert_allclose(quat_matrix(quat)[:, 2], iface.estimate[1], atol=1e-9)
         np.testing.assert_allclose(pos, iface.estimate[0])
+
+
+class BeamLiftRolloutTests(Step2EstimatorRolloutTests):
+    """Beam part 2 lift (gx4m_learning dexlong_beam_lift step 1, model_8000 and its estimator), against the export
+    --task beam_lift --step 1 rollout (600 steps, domain randomization off; without the trained latency the nominal
+    policy carries the beam past the goal, so both episodes time out). The policy and estimator carry the beam's x
+    and z axes (object_frame); the camera always sees the beam (no visibility model in training)."""
+    STEP = 'beam1'
+
+    def replay(self, iface, outcomes=None):
+        r, pe = self.rollout, self.reference['pose_estimator']
+        for k in range(len(r['obs'])):
+            if k == 0 or r['done'][k-1]:
+                iface.reset()
+                q = iface.ref['initial_joint_pos']
+            else:
+                q = r['q'][k-1]
+                iface.targets = r['targets'][k-1]
+                info = iface.update(q, r['object_pos'][k-1], r['object_quat'][k-1])
+                if outcomes is not None and not r['done'][k-1]:
+                    outcomes.append((k-1, info['outcome']))
+            yield k, iface.observation(q, r['tracked_pos'][k], quat_matrix(r['tracked_quat'][k]), r['contact'][k],
+                                       valid=bool(r['valid'][k]), age=float(r['age'][k])*pe['max_age_s'],
+                                       pad_force=r['pad_force'][k].reshape(4, 3)*pe['tactile_force_scale'])
+
+    def test_deployed_reference_matches_export(self):
+        self.assertEqual(load_reference(REFERENCES[self.STEP]), self.reference)
+        self.assertEqual(self.reference['task'], 'beam_lift_step1')
+        self.assertEqual(sum(self.reference['policy_fields'].values()), 83)
+        self.assertEqual(self.reference['object_axes'], [[1., 0., 0.], [0., 0., 1.]])
+        self.assertEqual(self.reference['pose_estimator']['axes'], 2)
+        self.assertEqual(self.reference['lift']['height'], .2)
+
+    def test_rollout_loses_the_gear(self):
+        r = self.rollout
+        self.assertTrue(r['est_first'][0])
+        self.assertTrue(r['valid'].all())          # always seen, as in training
+        self.assertGreater(r['object_pos'][:, 2].max(), self.reference['object_pos'][2] + .15)
+
+    def test_policy_matches_isaac(self):
+        actor = RslRlActor(MODELS[self.STEP])
+        self.assertEqual((actor.kind, actor.obs_dim, actor.action_dim), ('lstm', 83, 23))
+        err = 0.
+        for o, a, done in zip(self.rollout['obs'], self.rollout['action'], self.rollout['done']):
+            err = max(err, float(np.abs(actor(o) - a).max()))
+            if done:
+                actor.reset()
+        self.assertLess(err, 1e-3, f'max |action - isaac action| = {err:.2e}')
+
+    def test_lift_tracker_agrees_with_isaac(self):
+        """No outcome before Isaac's episode ends (no success, drop, fall or hand_far), the lift goal 20 cm above."""
+        iface, _ = self.interface()
+        outcomes = []
+        for _ in self.replay(iface, outcomes):
+            pass
+        np.testing.assert_allclose(iface.goal[0], self.reference['preinsert_pos'], atol=1e-6)
+        self.assertEqual([(k, o) for k, o in outcomes if o is not None], [])
+
+    def test_estimated_pose_has_the_estimated_axis(self):
+        iface, _ = self.interface()
+        for k, _ in self.replay(iface):
+            if k == 120:
+                break
+        pos, quat = iface.estimated_pose()
+        R = quat_matrix(quat)
+        np.testing.assert_allclose(R[:, 2], iface.estimate[1][3:]/np.linalg.norm(iface.estimate[1][3:]), atol=1e-9)
+        self.assertGreater(float(R[:, 0] @ iface.estimate[1][:3]), .99)     # the two estimated axes are a few deg from square
+        np.testing.assert_allclose(pos, iface.estimate[0])
+        # The estimate of the lifted beam is within a centimetre of the true pose.
+        self.assertLess(np.linalg.norm(pos - self.rollout['object_pos'][k-1]), .01)
+
+    def test_lift_success_after_holding_the_goal(self):
+        from step1 import quat_mul
+        iface = Step1Interface(self.reference, estimator=ESTIMATORS[self.STEP])
+        start, quat = np.array(self.reference['object_pos']) + [.004, -.003, -.003], self.reference['object_quat']
+        iface.reset(object_pose=(start, quat))
+        goal = iface.goal[0]
+        np.testing.assert_allclose(goal, [start[0], start[1], self.reference['object_pos'][2] + .2])
+        yaw = np.array([np.cos(np.radians(5)), 0., 0., np.sin(np.radians(5))])      # 10 deg off the start yaw
+        self.assertGreater(iface.keypoint_distance(goal, quat_mul(np.asarray(quat), yaw)), .01)
+        q = iface.ref['initial_joint_pos']
+        for step in range(self.reference['p2p']['success_steps'] - 1):
+            self.assertIsNone(iface.update(q, goal, quat)['outcome'])
+        self.assertEqual(iface.update(q, goal, quat)['outcome'], 'success')
+
+    def test_drop_ends_the_episode(self):
+        iface = Step1Interface(self.reference, estimator=ESTIMATORS[self.STEP])
+        iface.reset()
+        q = iface.ref['initial_joint_pos']
+        start, quat = np.array(self.reference['object_pos']), self.reference['object_quat']
+        # Risen 5 cm (the palm fixed here, so the beam rises in the hand), then 4 cm lower in the hand.
+        self.assertIsNone(iface.update(q, start + [0, 0, .05], quat)['outcome'])
+        self.assertIsNone(iface.update(q, start + [0, 0, .03], quat)['outcome'])
+        self.assertEqual(iface.update(q, start + [0, 0, .01], quat)['outcome'], 'drop')
+
+    def test_start_check_needs_the_trained_orientation(self):
+        from step1 import quat_mul, start_check
+        pos, quat = np.array(self.reference['object_pos']), np.asarray(self.reference['object_quat'])
+        self.assertTrue(start_check(self.reference, pos + [.008, -.008, .003], quat)[0])
+        self.assertFalse(start_check(self.reference, pos + [.015, 0, 0], quat)[0])
+        self.assertFalse(start_check(self.reference, pos, quat_mul(quat, [0., 0., 0., 1.]))[0])   # turned 180 deg
 
 
 class TrainingUrdfTests(unittest.TestCase):

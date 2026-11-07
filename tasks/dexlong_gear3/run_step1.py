@@ -34,6 +34,11 @@ powered until the operator confirms; disconnecting disables the motors (the arm 
   python tasks/dexlong_gear3/run_step1.py --mock --yes --max-steps 60          # no hardware
   python tasks/dexlong_gear3/run_step1.py --handeye <handeye_result.json> --hand-port COM5
   python tasks/dexlong_gear3/run_step1.py --step 2 --handeye <handeye_result.json> --hand-port COM5
+  python tasks/dexlong_gear3/run_step1.py --step beam1 --handeye <handeye_result.json> --hand-port COM5
+
+--step beam1 grasps Beam part 2 and lifts it 20 cm (gx4m_learning dexlong_beam_lift step 1, the perception tracking
+beam2): the goal is set above the beam's measured pose when the episode starts, the policy sees the beam's full
+orientation, and holding the goal for success_steps ends the episode as a success ('drop' if it falls out of the hand).
 """
 from __future__ import annotations
 
@@ -59,7 +64,8 @@ from gx4m_real.robot.compensation import JointCompensation      # noqa: E402
 from gx4m_real.robot.config import load_config                  # noqa: E402
 from gx4m_real.robot.hand import HandDriver                     # noqa: E402
 from gx4m_real.robot.kinematics import matrix_quat, quat_matrix  # noqa: E402
-from tasks.dexlong_gear3.step1 import ESTIMATORS, MODELS, REFERENCES, Step1Interface, load_reference  # noqa: E402
+from tasks.dexlong_gear3.step1 import (ESTIMATORS, MODELS, REFERENCES, Step1Interface, load_reference,  # noqa: E402
+                                       start_check, step_key)
 
 MODEL = MODELS[1]
 CONTROL_CONFIG = ROOT/'apps'/'control'/'config.yaml'
@@ -317,7 +323,14 @@ class Step1Runner:
     def episode(self, max_steps=None):
         """One policy episode from the start pose; returns (outcome, per-step log)."""
         iface = self.iface
-        iface.reset()
+        if iface.lift is not None:
+            # The lift goal is above where the part rests now (as in training, from the pose at the reset).
+            T, _ = self.gear_pose(self.joints())
+            if T is None:
+                return 'pose_lost', []
+            iface.reset(object_pose=(T[:3, 3], matrix_quat(T[:3, :3])))
+        else:
+            iface.reset()
         self.actor.reset()
         rows, result, outcome = [], None, None
         self.rate.next = None
@@ -354,7 +367,7 @@ class Step1Runner:
                 if iface.estimator is not None:
                     pad = self.pad_forces()
                     contact = (pad[:, 0] > iface.ref['binary_tactile_threshold_n']).astype(np.float64)
-                obs = iface.observation(q, pos, T[:3, 2], contact, valid=valid, age=age, pad_force=pad)
+                obs = iface.observation(q, pos, T[:3, :3], contact, valid=valid, age=age, pad_force=pad)
                 action = self.actor(obs)
                 targets = iface.apply_action(action, self.arm_speed_scale)
                 self.send(targets)
@@ -447,7 +460,8 @@ def open_tactile(args, iface):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--step', type=int, choices=sorted(REFERENCES), default=1)
+    parser.add_argument('--step', type=step_key, choices=list(REFERENCES), default=1,
+                        help='Split step 1 or 2, or beam1 (Beam part 2 lift)')
     parser.add_argument('--model', type=Path, help="Default: the step's deployed model")
     parser.add_argument('--config', type=Path, default=CONTROL_CONFIG, help='Arm config (CAN, limits, compensation)')
     parser.add_argument('--handeye', type=Path, help='handeye_result.json (required without --mock)')
@@ -478,7 +492,7 @@ def main(argv=None):
     config = arm_config(args.config, iface, args.handeye, args.arm_velocity)
     mesh_to_object = np.loadtxt(args.mesh_to_object) if args.mesh_to_object else None
     tactile = open_tactile(args, iface)
-    out =args.out or HERE/'runs'/datetime.now().strftime(f'step{args.step}_%Y%m%d_%H%M%S')
+    out =args.out or HERE/'runs'/datetime.now().strftime(f'step{args.step}_%Y%m%d_%H%M%S'.replace('stepbeam', 'beam'))
     out.mkdir(parents=True, exist_ok=False)
     (out/'run.json').write_text(json.dumps(dict(
         argv=sys.argv if argv is None else argv, step=args.step, model=str(args.model.resolve()), velocity_limit=config.velocity_limit,
@@ -515,10 +529,9 @@ def main(argv=None):
                 ask(f'No fresh gear pose (age {age:.2f} s). Fix perception, then Enter to retry')
                 T, age = runner.gear_pose(runner.joints())
             d = iface.keypoint_distance(T[:3, 3], matrix_quat(T[:3, :3]))
-            offset = T[:3, 3] - iface.ref['object_pos']
-            if np.abs(offset[:2]).max() > START_RANGE or abs(offset[2]) > .005:
-                print(f'WARNING: gear {np.round(offset*1000)} mm from the trained start (x, y within '
-                      f'+-{START_RANGE*1000:.0f} mm, flat on the table)')
+            ok, message = start_check(iface.ref, T[:3, 3], matrix_quat(T[:3, :3]))
+            if not ok:
+                print(f'WARNING: {message}')
             ask(f'Gear at {np.round(T[:3, 3], 3)} (start {np.round(iface.ref["object_pos"], 3)}), '
                 f'{d*1000:.0f} mm from the waypoint. Enter: run the policy (Ctrl-C holds)')
             outcome, rows = runner.episode(args.max_steps)

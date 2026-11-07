@@ -16,7 +16,8 @@ import numpy as np
 
 from detect_gear36 import HERE
 from gear_tracker import GearTracker
-from gears import DEFAULT_GEAR, GEAR_COLORS, GEARS, check_gear_mesh, gear_mesh_path, hsv_ranges, yaw_symmetry
+from gears import (BEAMS, DEFAULT_GEAR, END_MARKER, GEAR_COLORS, HSV_RANGES, PARTS, check_gear_mesh, gear_mesh_path,
+                   hsv_ranges, marked_end, yaw_symmetry)
 from gx4m_real.camera.cloud import save_cloud
 from gx4m_real.camera.orbbec import OrbbecRGBDStream
 
@@ -28,13 +29,14 @@ def label(image, lines, good):
                     .5, (80, 255, 80) if good else (0, 210, 255), 1, cv2.LINE_AA)
 
 
-def main(argv=None, observer=None, frame_hook=None, up_in_camera=None):
+def main(argv=None, observer=None, frame_hook=None, up_in_camera=None, reference_in_camera=None):
     """frame_hook(scorer, refiner, glctx, output) returns a callable run on each frame after its gear pose is sent.
-    up_in_camera (world +z in the camera frame) keeps registrations hub up (gear_tracker.hub_up)."""
+    up_in_camera (world +z in the camera frame) keeps registrations hub up (gear_tracker.hub_up);
+    reference_in_camera (3x3) keeps a beam's registration nearest that orientation (gear_tracker.GearTracker)."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--gpu', default='0')
     parser.add_argument('--device-index', type=int, default=0)
-    parser.add_argument('--gear', choices=sorted(GEARS), default=DEFAULT_GEAR)
+    parser.add_argument('--gear', choices=PARTS, default=DEFAULT_GEAR)
     parser.add_argument('--mesh', type=Path, help='Default: the simulation CAD mesh of --gear')
     parser.add_argument('--hsv-low', type=int, nargs=3,
                         help='OpenCV HSV range replacing the gear color (gear24 red, gear36 blue, gear48 yellow)')
@@ -47,6 +49,9 @@ def main(argv=None, observer=None, frame_hook=None, up_in_camera=None):
     parser.add_argument('--record', action='store_true', help='Save preview.avi at a fixed 15 fps playback rate')
     parser.add_argument('--min-iou', type=float, default=.45)
     parser.add_argument('--max-depth-error', type=float, default=.02, help='Median depth residual in metres')
+    parser.add_argument('--end-marker', choices=(*HSV_RANGES, 'none'), default=END_MARKER,
+                        help="Beams: color of the paper on the beam's +x end, which tells its ends apart ('none': "
+                             "the end nearest the trained start orientation)")
     args = parser.parse_args(argv)
     args.mesh = args.mesh or gear_mesh_path(args.gear)
     ranges = hsv_ranges(args.gear, args.hsv_low, args.hsv_high)
@@ -76,7 +81,10 @@ def main(argv=None, observer=None, frame_hook=None, up_in_camera=None):
     tracker = GearTracker(mesh, symmetry, ranges, scorer=scorer, refiner=refiner, glctx=glctx,
                           debug_dir=output / 'debug', register_iterations=args.register_iterations,
                           track_iterations=args.track_iterations, min_iou=args.min_iou,
-                          max_depth_error=args.max_depth_error, up_in_camera=up_in_camera)
+                          max_depth_error=args.max_depth_error, up_in_camera=up_in_camera,
+                          reference_in_camera=reference_in_camera,
+                          **(dict(marker_ranges=HSV_RANGES[args.end_marker], marker_end=marked_end(args.gear, mesh))
+                             if args.gear in BEAMS and args.end_marker != 'none' else {}))
     writer = None
     frame_count = accepted = registrations = tracks = 0
     durations = deque(maxlen=30)

@@ -21,10 +21,10 @@ gx4m_real/
 │   └── orbbec/                 # capture_rgbd、rgbd_view、pointcloud_view
 ├── tasks/
 │   └── dexlong_gear3/          # 三齿轮装配任务
-│       ├── config/             # initial_pose.json、wrist_camera.json、step1/step2_reference.json（来自 gx4m_learning）
-│       ├── models/             # 部署用的策略 checkpoint（step1、step2：30 Hz LSTM）
+│       ├── config/             # initial_pose.json、wrist_camera.json、step1/step2/beam1_reference.json（来自 gx4m_learning）
+│       ├── models/             # 部署用的策略 checkpoint（step1、step2、beam1：30 Hz LSTM，及位姿估计器）
 │       ├── step1.py            # step1/step2 观测构造、动作→关节目标、阶段状态机（预插→插入→撤手）
-│       ├── run_step1.py        # step1/step2 真机 30 Hz 主循环（--step；机械臂 PVT、灵巧手、UDP 齿轮位姿）
+│       ├── run_step1.py        # step1/step2/横梁抬起 真机 30 Hz 主循环（--step 1|2|beam1；机械臂 PVT、灵巧手、UDP 零件位姿）
 │       ├── tests/              # 与 Isaac 导出 rollout 逐步对比（观测、目标、LSTM 动作、阶段）
 │       ├── tools/              # mujoco_closed_loop.py：用 MuJoCo 替身代替硬件跑闭环
 │       ├── perception/         # gear24 位姿估计（FoundationPose）、UDP 发送、Viser 场景和 step1 摆放检查
@@ -169,6 +169,82 @@ URDF 按参考配置的 `robot_urdf` 选（`step1.reference_urdf`，Viser 页面
 手眼标定不用重做：外参是相机相对机械臂基座的 `T_base_cam`，主循环、摆放检查、底板检测和 Viser 场景都用 `initial_pose.json` 或参考配置里的基座重新算相机在世界里的位置（标定文件里记录的是采集时的基座，只用于提示）。前提是真机的相机和机械臂之间没有相对移动。
 
 当前的 step1 `model_4750` 和 step2 `model_4000` 是在旧基座下训练的，要按新基座重新训练。新模型训练好后，按上面的方法重新导出参考配置和 rollout；在那之前，回放测试用和 rollout 一起导出的旧参考（`tests/data/step{1,2}_isaac_reference.json`）。
+
+### 横梁抬起：beam1（2026-11-07）
+
+`--step beam1`：抓起横梁 part 2（蓝色），抬到起点正上方 20 cm。策略来自 gx4m_learning 的 `gx4m_dexlong_beam_step1_lift/2026-11-07_04-19-24` 第 8000 次迭代：
+- `models/beam1_lstm_20261107_iter8000.pt`；
+- 估计器 `models/beam1_estimator_20261107_iter8000.pt`。
+
+训练方法和齿轮 step2_lift 相同：
+- 30 Hz LSTM，加上 sim2real 的延迟和域随机化、橡胶指腹；
+- 位姿估计器按课程切入，策略看到的是估计位姿。
+
+训练统计：成功率约 0.91，估计器位置误差约 2.6 mm、姿态误差约 1.4°。Isaac 录像 4 次全部成功。
+
+**和齿轮的区别**
+- **完整朝向**：横梁没有对称轴，策略和估计器都用横梁的 x、z 两个轴（`object_frame`，6 维），策略输入共 83 维。
+  - 参考配置里的 `object_axes` 记录这两个轴。
+  - 估计器 `axes=2`，输出两个轴，`estimated_pose()` 正交化后给出完整姿态。
+  - 主循环把整个旋转矩阵传给 `observation()`。
+- **只有抬起，没有插入**：参考配置里的 `lift` 段记录抬起高度和掉落判定参数。
+  - 目标：回合开始时，按实测的横梁位姿把目标设在它正上方，高度取训练值（起点 z + 0.2）。目标朝向等于起点朝向，偏航也要对上。
+  - 成功：关键点在 1.5 cm 内累计 15 步。
+  - 掉落：横梁升高过 3 cm 后，相对手掌又下降 3 cm 以上，结果记为 `drop`。
+  - 超时：300 步（10 s）。
+- **起点固定**：训练时起点没有随机化。`step1.start_check` 要求横梁在训练起点 x、y 各 ±1 cm、高度 ±5 mm、朝向差 ≤ 10° 以内，否则拒绝开始。±1 cm 和 10° 是估计值，策略没见过别的起点。
+- **一直看得到**：训练里没有遮挡模型，估计器的 `valid` 输入一直是 1。真机上手挡住横梁、位姿超过 0.1 s 没更新时会标成丢失，这种输入估计器在训练里没见过，表现未知。
+
+**感知**
+- `perception/gears.py` 新增零件 `beam2`。
+  - 网格：`asset/fabrica_beam_3x/beam2_visual.obj`，就是仿真横梁的 visual 网格，原点和坐标轴与仿真一致。
+  - 颜色：和 gear36 一样用蓝色 HSV 范围，所以 gear36 不能同时在画面里。
+- **两端歧义**：横梁接近长方体，转 180° 外形几乎一样。处理方法：
+  - 在横梁 **+x 端贴一块黄色纸**。Viser 摆放检查页面里，起点模型上的黄点就是这一端。
+  - 配准后，`gear_tracker` 在横梁附近找黄色像素，取让 +x 端落在色纸处的那个解。
+  - 找不到色纸时，取最接近训练起点朝向的解（`reference_in_camera`）。
+  - `live_gear36.py --end-marker` 可以换颜色，`none` 表示不用色纸。
+  - 色纸要小，大部分横梁仍要露出蓝色，否则轮廓 IoU 会下降。
+- `step1_setup.py --step beam1`（`LiftSetup`）：
+  - 没有底板和销钉：黄色是训练起点，绿色是抬起目标；
+  - 实时显示起点偏差、朝向差和偏航；
+  - 位姿照常转发给主循环和控制进程。
+
+**运行**
+
+```bash
+bash tasks/dexlong_gear3/perception/run_setup.sh --step beam1 --calibration apps/charuco_handeye/runtime/<标定目录>/handeye_result.json
+bash tasks/dexlong_gear3/run_robot_server.sh --step beam1 --handeye apps/charuco_handeye/runtime/<标定目录>/handeye_result.json --hand-port /dev/ttyUSB0
+# 或者命令行主循环
+python tasks/dexlong_gear3/run_step1.py --step beam1 --handeye apps/charuco_handeye/runtime/<标定目录>/handeye_result.json --hand-port COM5
+```
+
+相机和机械臂之间没有相对移动，所以沿用现有手眼标定。基座和初始关节与齿轮任务相同（新底座）。
+
+**更新模型**
+1. 在 gx4m_learning 里导出：
+
+   ```powershell
+   C:\env_isaaclab\python.exe scripts\export_gear3_split_sim2sim_reference.py --task beam_lift --step 1 --checkpoint <model_*.pt> --out <目录> --steps 600
+   ```
+
+2. 复制文件：
+   - `reference.json` 复制到 `config/beam1_reference.json` 和 `tests/data/beam1_isaac_reference.json`；
+   - `rollout.npz` 复制到 `tests/data/beam1_isaac_rollout.npz`；
+   - 模型和估计器放进 `models/`，并修改 `step1.MODELS` / `ESTIMATORS`。
+3. 运行测试 `python -m unittest tasks.dexlong_gear3.tests.test_step1`。`BeamLiftRolloutTests` 逐步对比以下内容：
+   - 估计器输入和输出；
+   - 83 维观测；
+   - 动作映射和 LSTM 输出；
+   - 抬起阶段判定。
+
+导出回放关闭了域随机化，也就关掉了训练里的延迟和手臂滞后。标称策略这时会把横梁抬过头（到 0.48 m，目标 0.43 m），两个回合都超时，所以这份回放只用来对比接口，不代表成功率。
+
+**还要在真机上确认的**
+- 训练场景里起点旁边有一个接收件（仿真里的粉色盒子，在横梁起点 -x 方向约 24 cm）。真机桌上有没有它不影响抓取，但要确认手臂路径上没有别的东西。
+- 黄色纸在实际光照下的 HSV 范围。
+- 抓起后被手挡住时，跟踪会不会丢；丢失时估计器的表现。
+- PaXini 三轴映射，同 step2。
 
 ## step1 真机运行
 

@@ -115,5 +115,73 @@ class HubUpTests(unittest.TestCase):
         self.assertEqual(tracker.flips, 1)
 
 
+class BeamOrientationTests(unittest.TestCase):
+    """The box-like beam: of its 180 deg turns the registration nearest the trained start orientation is kept."""
+
+    def test_nearest_symmetric_restores_the_start_end(self):
+        from gears import BEAMS, check_gear_mesh, gear_mesh_path, nearest_symmetric, yaw_symmetry
+        import trimesh
+        symmetry = yaw_symmetry('beam2')
+        self.assertEqual(len(symmetry), 4)
+        for S in symmetry:
+            np.testing.assert_allclose(np.linalg.det(S[:3, :3]), 1.)
+        check_gear_mesh(trimesh.load(gear_mesh_path('beam2'), force='mesh'), 'beam2')
+        self.assertIn('beam2', BEAMS)
+        start = rotation([.3, -.2, 1.], 1.1)                                  # trained start, in the camera
+        start[:3, 3] = [.05, .02, .45]
+        near = start @ rotation([0, 0, 1], np.radians(6))                  # placed 6 deg off
+        for S in symmetry:                                                 # whichever end was registered
+            registered = near @ S
+            kept = nearest_symmetric(registered, symmetry, start[:3, :3])
+            np.testing.assert_allclose(kept, near, atol=1e-12)
+
+    def test_tracker_turns_the_registration_toward_the_start(self):
+        import torch
+        from gears import yaw_symmetry
+
+        class Estimator:
+            center = np.eye(4)
+
+            def get_tf_to_centered_mesh(self):
+                return torch.as_tensor(self.center)
+
+        start = rotation([0, 0, 1], np.pi/2)
+        flipped = start @ yaw_symmetry('beam2')[3]                         # registered the other way round
+        estimator = Estimator()
+        estimator.pose_last = torch.as_tensor(flipped, dtype=torch.float32)
+        tracker = GearTracker.__new__(GearTracker)
+        tracker.torch, tracker.up_in_camera, tracker.flips = torch, None, 0
+        tracker.symmetry, tracker.reference_in_camera = yaw_symmetry('beam2'), start[:3, :3]
+        np.testing.assert_allclose(tracker.keep_hub_up(estimator, flipped), start, atol=1e-12)
+        np.testing.assert_allclose(estimator.pose_last.numpy(), start, atol=1e-6)
+        self.assertEqual(tracker.flips, 1)
+        self.assertIs(tracker.keep_hub_up(estimator, start), start)
+
+    def test_end_marker_decides_against_the_reference(self):
+        """A beam placed the other way round: the yellow paper wins over the trained orientation."""
+        from gears import HSV_RANGES, marked_end, marked_symmetric, marker_point, yaw_symmetry
+        import trimesh
+        from gears import gear_mesh_path
+        mesh = trimesh.load(gear_mesh_path('beam2'), force='mesh')
+        end = marked_end('beam2', mesh)
+        self.assertAlmostEqual(end[0], mesh.bounds[1][0])
+        K = np.array([[600., 0, 320], [0, 600., 240], [0, 0, 1]])
+        start = rotation([1, 0, 0], np.radians(150))                        # camera looking down at the table
+        start[:3, 3] = [0., 0., .5]
+        placed = start @ yaw_symmetry('beam2')[3]                           # turned 180 deg about its z
+        tip = placed[:3, :3] @ end + placed[:3, 3]                          # where the paper really is
+        u, v = (K @ tip/tip[2])[:2].round().astype(int)
+        rgb = np.full((480, 640, 3), (40, 60, 200), np.uint8)               # blue beam everywhere
+        rgb[v-4:v+5, u-4:u+5] = (235, 200, 40)                              # yellow paper
+        depth = np.full((480, 640), tip[2], np.float32)
+        seen = marker_point(rgb, depth, K, np.ones((480, 640), bool), HSV_RANGES['yellow'])
+        self.assertLess(np.linalg.norm(seen - tip), .003)
+        symmetry = yaw_symmetry('beam2')
+        for S in symmetry:                                                  # whichever end was registered
+            np.testing.assert_allclose(marked_symmetric(placed @ S, symmetry, end, seen), placed, atol=1e-9)
+        self.assertIsNone(marked_symmetric(placed, symmetry, end, seen + [0, .1, 0]))   # paper off the beam
+        self.assertIsNone(marker_point(rgb*0 + 128, depth, K, np.ones((480, 640), bool), HSV_RANGES['yellow']))
+
+
 if __name__ == '__main__':
     unittest.main()

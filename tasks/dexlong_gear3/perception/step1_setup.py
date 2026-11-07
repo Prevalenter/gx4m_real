@@ -24,6 +24,14 @@ guiding, start pose, policy, stop) drive tasks/dexlong_gear3/robot_server.py, wh
   bash tasks/dexlong_gear3/run_robot_server.sh --handeye <handeye_result.json> --hand-port /dev/ttyUSB0
   python tasks/dexlong_gear3/perception/step1_setup.py --demo     # synthetic gear on the pin, no camera or GPU
   bash tasks/dexlong_gear3/perception/run_setup.sh --step 2 --calibration <handeye_result.json>
+  bash tasks/dexlong_gear3/perception/run_setup.sh --step beam1 --calibration <handeye_result.json>
+
+--step beam1 (Beam part 2 lift, LiftSetup) tracks the blue beam instead and has no plate or pin: it shows the trained
+start pose of the beam (yellow) and the lift goal 20 cm above it (green), and checks the beam at the start. The policy
+was trained from that one pose, so it must lie within +-1 cm in x and y, 5 mm in height and 10 deg in orientation
+(step1.start_check, which robot_server.py applies before the policy starts). A yellow paper on the beam's +x end
+(the yellow dot on the start model; live_gear36 --end-marker) tells the beam's ends apart; without it in view the
+registration keeps the end nearest the trained start orientation.
 """
 from __future__ import annotations
 
@@ -38,17 +46,20 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 import trimesh
 
-from gears import DEFAULT_GEAR, PLATE_MESH, gear_mesh_path
+from gears import DEFAULT_GEAR, DISPLAY_RGB, END_MARKER, PLATE_MESH, gear_mesh_path, marked_end
 from viser_scene import (DEFAULT_INITIAL, SceneViewer, initial_base, load_calibration, reference_urdf, rigid, set_pose,
                          world_object)
 
 HERE = Path(__file__).resolve().parent
 REFERENCE = HERE.parent/'config'/'step1_reference.json'
 # Split step -> (reference, gear it inserts); as step1.REFERENCES (that module needs the robot environment).
-STEPS = {1: (REFERENCE, 'gear24'), 2: (HERE.parent/'config'/'step2_reference.json', 'gear48')}
+STEPS = {1: (REFERENCE, 'gear24'), 2: (HERE.parent/'config'/'step2_reference.json', 'gear48'),
+         'beam1': (HERE.parent/'config'/'beam1_reference.json', 'beam2')}
 # Tolerances (m, deg). The stage switch is 3 mm over the gear keypoints; the policy saw a 1 mm goal-relative bias.
 PIN_XY, PIN_Z, PIN_TILT = .003, .003, 3.
 START_XY, START_Z, START_TILT = .02, .005, 5.
+# Lift references (one fixed trained start, full orientation): as step1.start_check.
+LIFT_START_XY, LIFT_START_ANGLE = .01, 10.
 
 
 def pose(pos, wxyz):
@@ -230,6 +241,77 @@ class Step1Setup(SceneViewer):
                 self.check.content = '齿轮位姿已过期，检查暂停。'
 
 
+def lift_start_report(position, rotation, reference):
+    """Beam-at-start errors (m, deg) of an env-frame pose against the trained start pose."""
+    start = pose(reference['object_pos'], reference['object_quat'])
+    d = np.asarray(position) - start[:3, 3]
+    relative = start[:3, :3].T @ rotation
+    angle = float(np.degrees(np.arccos(np.clip((np.trace(relative) - 1)/2, -1., 1.))))
+    yaw = float(np.degrees(np.arctan2(relative[1, 0], relative[0, 0])))
+    ok = max(abs(d[0]), abs(d[1])) <= LIFT_START_XY and abs(d[2]) <= START_Z and angle <= LIFT_START_ANGLE
+    return dict(dx=d[0], dy=d[1], dz=d[2], angle=angle, yaw=yaw, ok=bool(ok))
+
+
+def lift_report_markdown(r):
+    mm = lambda v: f'{v*1000:+.1f} mm'
+    return (f"**起点（横梁平放在桌上）** {'✅' if r['ok'] else '❌'}\n\n"
+            f"x {mm(r['dx'])}，y {mm(r['dy'])}（各 ≤ ±{LIFT_START_XY*1000:.0f} mm），高度 {mm(r['dz'])}"
+            f"（≤ {START_Z*1000:.0f} mm），朝向差 {r['angle']:.1f}°（≤ {LIFT_START_ANGLE:.0f}°，其中绕自身 z 偏航 "
+            f"{r['yaw']:+.1f}°）\n\n"
+            + ('' if r['ok'] else f"横梁按 x {mm(-r['dx'])}、y {mm(-r['dy'])} 移动（世界坐标轴），"
+               f"偏航转 {-r['yaw']:+.1f}°。\n\n"))
+
+
+class LiftSetup(SceneViewer):
+    """Lift references (the beam): the trained start (yellow) and lift goal (green), and the start check."""
+
+    def __init__(self, calibration, *, reference, history=15, gear='beam2', **kwargs):
+        kwargs.setdefault('urdf', reference_urdf(reference))
+        super().__init__(calibration, gear=gear, **kwargs)
+        self.ref, self.history = reference, deque(maxlen=history)
+        part = trimesh.load(gear_mesh_path(gear), force='mesh')
+        r = reference
+        height = r['lift']['height']
+        start = pose(r['object_pos'], r['object_quat'])
+        goal = start.copy()
+        goal[2, 3] += height
+        mesh_handle(self.server, '/sim/start_part', part, (240, 200, 40), .35, start)
+        mesh_handle(self.server, '/sim/goal_part', part, (40, 200, 90), .35, goal)
+        scene = self.server.scene
+        scene.add_label('/sim/start_label', f'起点 ±{LIFT_START_XY*100:.0f} cm', position=start[:3, 3] + [0, 0, .05])
+        scene.add_label('/sim/goal_label', f'抬起目标（起点上方 {height*100:.0f} cm）', position=goal[:3, 3] + [0, 0, .05])
+        end = start[:3, :3] @ marked_end(gear, part) + start[:3, 3]
+        scene.add_icosphere('/sim/marked_end', radius=.008, color=DISPLAY_RGB[END_MARKER], position=end)
+        scene.add_label('/sim/marked_end_label', '贴色纸的一端', position=end + [0, 0, .03])
+        gui = self.server.gui
+        gui.add_markdown('## 横梁抬起 摆放检查\n黄色：训练起点（策略只在这一个位姿训练过）；绿色：抬起目标。'
+                         '横梁要和黄色模型重合；贴色纸的一端（黄点）要在同一侧，两端不能放反。')
+        self.check = gui.add_markdown('等待横梁位姿。')
+        self.report = None
+
+    def update(self, record, *, rgb=None, K=None):
+        super().update(record, rgb=rgb, K=K)
+        with self.lock:
+            if not self.part.visible:
+                self.history.clear()
+                self.report = None
+                self.check.content = '没有有效的横梁位姿，检查暂停。'
+                return
+            self.history.append(world_object(self.calibration, record['object_in_camera']))
+            poses = np.asarray(self.history)
+            rotation = Rotation.from_matrix(poses[:, :3, :3]).mean().as_matrix()
+            self.report = lift_start_report(np.median(poses[:, :3, 3], axis=0), rotation, self.ref)
+            self.check.content = lift_report_markdown(self.report) + f'（最近 {len(self.history)} 帧中位数）'
+
+    def expire(self, now=None):
+        super().expire(now)
+        with self.lock:
+            if not self.part.visible and self.history:
+                self.history.clear()
+                self.report = None
+                self.check.content = '横梁位姿已过期，检查暂停。'
+
+
 def plate_frame_hook(viewer, reference):
     """live_gear36 frame_hook measuring the plate when the viewer's button was pressed."""
     def build(scorer, refiner, glctx, output):
@@ -280,7 +362,8 @@ def main(argv=None):
     parser.add_argument('--calibration', type=Path, help='Fixed-camera handeye_result.json')
     parser.add_argument('--demo', action='store_true', help='Synthetic gear on the pin, then at the start; no camera')
     parser.add_argument('--plate', type=Path, help='Show this plate_result.json from detect_plate.py until the button is pressed')
-    parser.add_argument('--step', type=int, choices=sorted(STEPS), default=1, help='Split step: its reference and gear')
+    parser.add_argument('--step', type=lambda v: int(v) if v.isdigit() else v, choices=list(STEPS), default=1,
+                        help='Split step 1 or 2 (its reference and gear), or beam1 (Beam part 2 lift)')
     parser.add_argument('--reference', type=Path, help="Default: the step's reference")
     parser.add_argument('--initial-pose', type=Path, default=DEFAULT_INITIAL)
     parser.add_argument('--target', default='127.0.0.1:5701', help="Forward poses to run_step1.py ('' to disable)")
@@ -305,8 +388,13 @@ def main(argv=None):
     else:
         calibration = load_calibration(args.calibration, initial)
     plate = json.loads(args.plate.read_text(encoding='utf-8')) if args.plate else None
-    viewer = Step1Setup(calibration, reference=reference, plate=plate, gear=gear, initial=initial, host=args.host,
-                        port=args.port, live=not args.demo)
+    lift = reference.get('lift') is not None
+    if lift:
+        viewer = LiftSetup(calibration, reference=reference, gear=gear, initial=initial, host=args.host,
+                           port=args.port, live=not args.demo)
+    else:
+        viewer = Step1Setup(calibration, reference=reference, plate=plate, gear=gear, initial=initial, host=args.host,
+                            port=args.port, live=not args.demo)
     if args.robot:
         from robot_panel import RobotPanel
         host, port = args.robot.rsplit(':', 1)
@@ -315,12 +403,18 @@ def main(argv=None):
     try:
         if args.demo:
             T_cam_world = np.linalg.inv(rigid(calibration['T_world_base']) @ rigid(calibration['T_base_cam']))
-            on_pin = pose(np.asarray(reference['final_pos']) + [.002, -.001, 0], reference['final_quat'])
-            for _ in range(15):
-                viewer.update({'status': 'TRACK', 'object_in_camera': T_cam_world @ on_pin})
-            print(json.dumps(viewer.report, indent=2, default=lambda v: v.item()), flush=True)
-            shifted = pose(np.asarray(reference['fixture_pos']) + [.002, -.001, 0], reference['fixture_quat'])
-            viewer.show_plate(T_cam_world @ shifted, '合成')
+            if lift:
+                near = pose(np.asarray(reference['object_pos']) + [.004, -.012, 0], reference['object_quat'])
+                for _ in range(15):
+                    viewer.update({'status': 'TRACK', 'object_in_camera': T_cam_world @ near})
+                print(json.dumps(viewer.report, indent=2, default=lambda v: v.item()), flush=True)
+            else:
+                on_pin = pose(np.asarray(reference['final_pos']) + [.002, -.001, 0], reference['final_quat'])
+                for _ in range(15):
+                    viewer.update({'status': 'TRACK', 'object_in_camera': T_cam_world @ on_pin})
+                print(json.dumps(viewer.report, indent=2, default=lambda v: v.item()), flush=True)
+                shifted = pose(np.asarray(reference['fixture_pos']) + [.002, -.001, 0], reference['fixture_quat'])
+                viewer.show_plate(T_cam_world @ shifted, '合成')
             while not viewer.stop_event.wait(.2):
                 pass
         else:
@@ -330,9 +424,14 @@ def main(argv=None):
                 from publish_gear_pose import UdpPosePublisher
                 host, port = args.target.rsplit(':', 1)
                 observers.append(UdpPosePublisher(host, int(port)))
-            up_in_camera = viewer.T_world_cam[:3, :3].T @ [0., 0., 1.]     # gears lie hub up (gear_tracker.hub_up)
-            detect_live(['--gear', gear, '--no-display', *inference_args], observer=Observers(*observers),
-                        frame_hook=plate_frame_hook(viewer, reference), up_in_camera=up_in_camera)
+            if lift:     # the beam keeps the trained start orientation (gear_tracker), no plate
+                start = viewer.T_world_cam[:3, :3].T @ pose(reference['object_pos'], reference['object_quat'])[:3, :3]
+                detect_live(['--gear', gear, '--no-display', *inference_args], observer=Observers(*observers),
+                            reference_in_camera=start)
+            else:
+                up_in_camera = viewer.T_world_cam[:3, :3].T @ [0., 0., 1.]     # gears lie hub up (gear_tracker.hub_up)
+                detect_live(['--gear', gear, '--no-display', *inference_args], observer=Observers(*observers),
+                            frame_hook=plate_frame_hook(viewer, reference), up_in_camera=up_in_camera)
     except KeyboardInterrupt:
         pass
     finally:

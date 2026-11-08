@@ -1,0 +1,24 @@
+# Joint solve (solve_joint.py): hand-eye + fingertip contacts + column + plate
+version: 1
+joints:
+  joint1:
+    direction: -1
+    offset_deg: 11.1842
+  joint2:
+    direction: 1
+    offset_deg: 0.4693
+  joint3:
+    direction: -1
+    offset_deg: -2.1378
+  joint4:
+    direction: 1
+    offset_deg: -0.192
+  joint5:
+    direction: -1
+    offset_deg: 0.54
+  joint6:
+    direction: -1
+    offset_deg: -1.2316
+  joint7:
+    direction: -1
+    offset_deg: 7.8836

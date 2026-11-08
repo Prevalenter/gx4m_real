@@ -1,0 +1,116 @@
+{
+  "display_result": "/home/yuanshi/Documents/lx/gx4m_real/apps/charuco_handeye/runtime/he_20261102_185319_j1p87_zm14/calibration/handeye_result.json",
+  "urdf": "/home/yuanshi/Documents/lx/gx4m_real/asset/gx7_right/urdf/gx7_right_gx4m_cam_xl330_pad.urdf",
+  "display_compensation": {
+    "directions": [
+      -1,
+      1,
+      -1,
+      1,
+      -1,
+      -1,
+      -1
+    ],
+    "offsets_deg": [
+      8.7,
+      0.0,
+      -1.1702,
+      0.0,
+      -2.2,
+      -3.131,
+      11.0
+    ],
+    "source": "apps/charuco_handeye/runtime/he_20261102_185319_j1p87_zm14/joint_compensation.yaml"
+  },
+  "arm_directions": [
+    -1,
+    1,
+    -1,
+    1,
+    -1,
+    -1,
+    -1
+  ],
+  "hand_directions": [
+    1.0,
+    1.0,
+    -1.0,
+    1.0,
+    1.0,
+    -1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    -1.0,
+    -1.0,
+    1.0,
+    1.0,
+    -1.0,
+    -1.0
+  ],
+  "tactile_serials": [
+    "5AA9026150",
+    "5AA9025877",
+    "5AA9025887",
+    "5C63009287"
+  ],
+  "robot_server": "127.0.0.1:5702",
+  "base_pose_file": "tasks/dexlong_gear3/config/initial_pose.json",
+  "T_world_base_display": [
+    [
+      4.996003610813204e-16,
+      1.0000000000000002,
+      3.5735303605122226e-16,
+      0.11963006264715627
+    ],
+    [
+      -0.9983642597365588,
+      4.996003610813204e-16,
+      -0.057173463080988474,
+      -0.3336570848631271
+    ],
+    [
+      -0.057173463080988474,
+      -3.2959746043559335e-16,
+      0.998364259736559,
+      0.8858435786051017
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "camera_serial": "CP0F463000ER",
+  "created_at": "2026-11-09T00:22:27",
+  "window_sec": 1.0,
+  "max_arm_spread_deg": 0.1,
+  "max_hand_spread_deg": 0.5,
+  "fingers": [
+    "\u62c7\u6307",
+    "\u98df\u6307",
+    "\u4e2d\u6307",
+    "\u65e0\u540d\u6307"
+  ],
+  "hand_joints": [
+    "gx4m_joint1",
+    "gx4m_joint2",
+    "gx4m_joint3",
+    "gx4m_joint4",
+    "gx4m_joint5",
+    "gx4m_joint6",
+    "gx4m_joint7",
+    "gx4m_joint8",
+    "gx4m_joint9",
+    "gx4m_joint10",
+    "gx4m_joint11",
+    "gx4m_joint12",
+    "gx4m_joint13",
+    "gx4m_joint14",
+    "gx4m_joint15",
+    "gx4m_joint16"
+  ],
+  "contact": "contact samples have all four fingertips on the table (operator-guaranteed); tactile_n is for reference only"
+}

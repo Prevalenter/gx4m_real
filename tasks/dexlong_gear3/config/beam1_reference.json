@@ -1,6 +1,6 @@
 {
  "task": "beam_lift_step1",
- "checkpoint": "E:\\work\\gx4max\\gx4m_learning\\logs\\rsl_rl\\gx4m_dexlong_beam_step1_lift\\2026-11-07_04-19-24\\model_8000.pt",
+ "checkpoint": "E:\\work\\gx4max\\gx4m_learning\\logs\\rsl_rl\\gx4m_dexlong_beam_step1_lift\\2026-11-08_13-22-17\\model_9750.pt",
  "joint_order": [
   "joint1",
   "joint2",
@@ -336,16 +336,16 @@
   "gx4m_link17_pad"
  ],
  "initial_joint_pos": [
-  0.5619960427284241,
-  -0.4642575681209564,
-  0.22165681421756744,
-  -1.7488199472427368,
-  -0.10646508634090424,
-  0.0,
-  -0.6143559217453003,
-  0.39793506264686584,
-  1.6912240982055664,
-  0.18325957655906677,
+  0.8290314078330994,
+  -0.5026548504829407,
+  0.23038345575332642,
+  -1.6650440692901611,
+  -0.21118484437465668,
+  -0.4921828508377075,
+  -0.1431169956922531,
+  0.5253441333770752,
+  1.7470746040344238,
+  0.59690260887146,
   0.1745329201221466,
   0.015707964077591896,
   0.8726646304130554,
@@ -372,19 +372,19 @@
   -0.7068175673484802
  ],
  "object_pos": [
-  0.1986568123102188,
-  -0.20988450944423676,
-  0.23000000417232513
+  0.09986212849617004,
+  -0.14951322972774506,
+  0.2290000021457672
  ],
  "object_quat": [
-  6.123031769111886e-17,
-  2.220446049250313e-16,
-  -2.220446049250313e-16,
-  1.0
+  0.258819043636322,
+  -5.746937229130156e-17,
+  2.1447861547258028e-16,
+  -0.9659258127212524
  ],
  "object_mass": 0.06857000291347504,
  "fixture_pos": [
-  -0.04509452357888222,
+  -0.24037979543209076,
   -0.2096678912639618,
   0.20999997854232788
  ],
@@ -396,26 +396,26 @@
  ],
  "mounted_gears": [],
  "preinsert_pos": [
-  0.1986568123102188,
-  -0.20988450944423676,
-  0.4300000071525574
+  0.09986212849617004,
+  -0.14951322972774506,
+  0.42900002002716064
  ],
  "preinsert_quat": [
-  6.123031769111886e-17,
-  2.220446049250313e-16,
-  -2.220446049250313e-16,
-  1.0
+  0.258819043636322,
+  -5.746937229130156e-17,
+  2.1447861547258028e-16,
+  -0.9659258127212524
  ],
  "final_pos": [
-  0.1986568123102188,
-  -0.20988450944423676,
-  0.4300000071525574
+  0.09986212849617004,
+  -0.14951322972774506,
+  0.42900002002716064
  ],
  "final_quat": [
-  6.123031769111886e-17,
-  2.220446049250313e-16,
-  -2.220446049250313e-16,
-  1.0
+  0.258819043636322,
+  -5.746937229130156e-17,
+  2.1447861547258028e-16,
+  -0.9659258127212524
  ],
  "obs_offsets": [
   [
@@ -526,7 +526,7 @@
  "grasp_position": [
   0.0,
   0.0,
-  0.0
+  -4.619613977301645e-17
  ],
  "goal_yaw_symmetry": 0,
  "yaw_free_goal": false,
@@ -534,10 +534,11 @@
   "distance_delta_rew_scale": 300.0,
   "approach_fingers": [
    0,
-   1
+   2
   ],
   "approach_farthest": true,
   "approach_after_lift": true,
+  "approach_saturation": 0.03,
   "keypoint_rew_scale": 200.0,
   "keypoint_near_distance": 0.1,
   "keypoint_near_multiplier": 5.0,
@@ -553,7 +554,7 @@
   "lifting_bonus_threshold": 0.15,
   "force_lift_reward_active": false,
   "lift_progress_height": 0.2,
-  "lift_progress_reward": 400.0,
+  "lift_progress_reward": 80.0,
   "reach_goal_bonus": 1000.0,
   "arm_velocity_penalty": 0.03,
   "hand_velocity_penalty": 0.003,
@@ -583,8 +584,7 @@
   "object_pos_rel_palm": 3,
   "object_pos_rel_goal": 3,
   "object_frame": 6,
-  "fingertip_object_contact": 4,
-  "object_pose_std": 2
+  "fingertip_object_contact": 4
  },
  "align_reward": {
   "scale": 2.0,
@@ -679,27 +679,5 @@
   "height": 0.2,
   "drop_min_rise": 0.03,
   "drop_fall": 0.03
- },
- "pose_estimator": {
-  "inputs": {
-   "joint_pos": 23,
-   "prev_action_targets": 23,
-   "palm_rot": 4,
-   "fingertips_in_palm": 12,
-   "tracked_pos_in_palm": 3,
-   "tracked_axis_in_palm": 6,
-   "tracked_valid": 1,
-   "tracked_age": 1,
-   "pad_force": 12
-  },
-  "axes": 2,
-  "hidden": 256,
-  "file": "estimator.pt",
-  "position_scale": 10.0,
-  "tactile_force_scale": 5.0,
-  "max_age_s": 3.0,
-  "min_visible": 0.65,
-  "reacquire_steps": 3,
-  "pad_force_axes": "per finger (normal into the pad, distal shear, lateral shear) in the fingertip link frame"
  }
 }

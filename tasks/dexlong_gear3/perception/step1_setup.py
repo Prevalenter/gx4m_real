@@ -395,10 +395,12 @@ def main(argv=None):
     else:
         viewer = Step1Setup(calibration, reference=reference, plate=plate, gear=gear, initial=initial, host=args.host,
                             port=args.port, live=not args.demo)
+    panel = None
     if args.robot:
         from robot_panel import RobotPanel
         host, port = args.robot.rsplit(':', 1)
-        RobotPanel(viewer, (host, int(port)))
+        panel = RobotPanel(viewer, (host, int(port)))
+    episode_video = None if panel is None else panel.episode_video     # each policy episode recorded beside its log
     print(f'Viser: http://{args.host}:{viewer.server.get_port()}', flush=True)
     try:
         if args.demo:
@@ -427,11 +429,12 @@ def main(argv=None):
             if lift:     # the beam keeps the trained start orientation (gear_tracker), no plate
                 start = viewer.T_world_cam[:3, :3].T @ pose(reference['object_pos'], reference['object_quat'])[:3, :3]
                 detect_live(['--gear', gear, '--no-display', *inference_args], observer=Observers(*observers),
-                            reference_in_camera=start)
+                            reference_in_camera=start, episode_video=episode_video)
             else:
                 up_in_camera = viewer.T_world_cam[:3, :3].T @ [0., 0., 1.]     # gears lie hub up (gear_tracker.hub_up)
                 detect_live(['--gear', gear, '--no-display', *inference_args], observer=Observers(*observers),
-                            frame_hook=plate_frame_hook(viewer, reference), up_in_camera=up_in_camera)
+                            frame_hook=plate_frame_hook(viewer, reference), up_in_camera=up_in_camera,
+                            episode_video=episode_video)
     except KeyboardInterrupt:
         pass
     finally:

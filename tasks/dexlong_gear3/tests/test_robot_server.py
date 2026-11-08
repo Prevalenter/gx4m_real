@@ -87,9 +87,11 @@ class ControllerTests(unittest.TestCase):
         time.sleep(.5)
         self.assertEqual(c.status()['busy'], 'run_policy')
         self.assertEqual(enabled_actions(c.status()), {'stop'})
+        self.assertEqual(c.status()['episode'], str(c.out.resolve()/'episode_000'))    # the viewer's video path
         s = self.run_action(c, 'stop')
         self.assertIn('已停止', s['message'])
         self.assertEqual(s['arm']['mode'], 'hold')
+        self.assertIsNone(s['episode'])
         self.assertTrue((c.out/'episode_000.npz').is_file())
         s = self.run_action(c, 'disconnect_hand')
         self.assertFalse(s['hand']['connected'])

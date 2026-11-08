@@ -7,7 +7,7 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HERE))
-from gear_tracker import FLIP, GearTracker, hub_up, occluders, visible_iou  # noqa: E402
+from gear_tracker import FLIP, GearTracker, draw_axis, hub_up, occluders, orthonormal, visible_iou  # noqa: E402
 
 
 def scene():
@@ -113,6 +113,34 @@ class HubUpTests(unittest.TestCase):
         self.assertIs(tracker.keep_hub_up(estimator, pose), pose)          # already hub up: nothing changes
         self.assertIs(estimator.pose_last, before)
         self.assertEqual(tracker.flips, 1)
+
+
+class OrthonormalTests(unittest.TestCase):
+    def test_drifted_rotation_is_restored(self):
+        pose = rotation([.4, -1., .3], 2.)
+        pose[:3, 3] = [.03, -.02, .45]
+        drifted = pose.copy()
+        drifted[:3, :3] += np.random.default_rng(0).normal(0, 3e-4, (3, 3))   # ~10000 tracked frames of float32
+        fixed = orthonormal(drifted)
+        np.testing.assert_allclose(fixed[:3, :3].T @ fixed[:3, :3], np.eye(3), atol=1e-12)
+        self.assertAlmostEqual(np.linalg.det(fixed[:3, :3]), 1.)
+        np.testing.assert_allclose(fixed[:3, :3], pose[:3, :3], atol=1e-3)    # only the drift is removed
+        np.testing.assert_array_equal(fixed[:3, 3], pose[:3, 3])
+        np.testing.assert_allclose(orthonormal(pose), pose, atol=1e-12)
+
+
+class DrawAxisTests(unittest.TestCase):
+    def test_same_picture_as_foundationposes(self):
+        try:
+            from Utils import draw_xyz_axis
+        except ImportError:
+            self.skipTest('needs the foundationpose environment')
+        K = np.array([[460., 0, 325], [0, 460., 244], [0, 0, 1]])
+        pose = rotation([.4, -1., .3], 2.)
+        pose[:3, 3] = [.03, -.02, .45]
+        rgb = np.random.default_rng(0).integers(0, 256, (480, 640, 3), dtype=np.uint8)
+        expected = draw_xyz_axis(rgb.copy(), ob_in_cam=pose, scale=.04, K=K, thickness=2, is_input_rgb=True)
+        np.testing.assert_array_equal(draw_axis(rgb.copy(), pose, K), expected)
 
 
 class BeamOrientationTests(unittest.TestCase):

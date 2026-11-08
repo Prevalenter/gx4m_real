@@ -26,6 +26,27 @@ def occluders(depth, rendered, margin=OCCLUSION_MARGIN, ring_px=OCCLUSION_RING_P
     return (silhouette & valid & (depth < rendered - margin)) | (ring & valid & (depth < rendered[silhouette].min() - margin))
 
 
+def draw_axis(rgb, pose, K, scale=.04, thickness=2):
+    """The pose's x, y, z axes (red, green, blue) drawn in place on an RGB image. Same picture as FoundationPose's
+    draw_xyz_axis without transparency, which compares the whole frame per axis (~32 ms a frame at 640x480)."""
+    import cv2
+
+    points = pose[:3, :3] @ np.vstack([np.zeros(3), scale*np.eye(3)]).T + pose[:3, 3:]
+    uv = K @ points
+    uv = np.round(uv[:2]/uv[2]).astype(int).T
+    for end, color in zip(uv[1:], [(255, 0, 0), (0, 255, 0), (0, 0, 255)]):
+        cv2.arrowedLine(rgb, tuple(uv[0].tolist()), tuple(end.tolist()), color, thickness, cv2.LINE_AA, tipLength=0)
+    return rgb
+
+
+def orthonormal(pose):
+    """pose with its rotation replaced by the nearest rotation matrix (SVD)."""
+    U, _, Vt = np.linalg.svd(pose[:3, :3])
+    out = np.array(pose, dtype=np.float64)
+    out[:3, :3] = U @ np.diag([1., 1., np.linalg.det(U @ Vt)]) @ Vt
+    return out
+
+
 def hub_up(pose, up_in_camera):
     """pose, or pose turned over (FLIP) when its mesh +z (the hub side) points against up_in_camera (world up in
     the camera frame). The turned-over pose covers the same disc; only the hub moves to the other side."""
@@ -70,10 +91,10 @@ class GearTracker:
                  up_in_camera=None, reference_in_camera=None, marker_ranges=None, marker_end=None):
         import torch
         from estimater import FoundationPose
-        from Utils import draw_posed_3d_box, draw_xyz_axis, nvdiffrast_render
+        from Utils import draw_posed_3d_box, nvdiffrast_render
 
         self.torch, self.FoundationPose = torch, FoundationPose
-        self.draw_box, self.draw_axis, self.render = draw_posed_3d_box, draw_xyz_axis, nvdiffrast_render
+        self.draw_box, self.render = draw_posed_3d_box, nvdiffrast_render
         self.mesh, self.symmetry, self.ranges = mesh, symmetry, ranges
         self.scorer, self.refiner, self.glctx, self.debug_dir = scorer, refiner, glctx, str(debug_dir)
         self.register_iterations, self.track_iterations = register_iterations, track_iterations
@@ -168,6 +189,14 @@ class GearTracker:
                 depth = np.where(occluders(depth, self.last_render), 0, depth).astype(depth.dtype)
             pose = estimator.track_one(rgb=frame.rgb, depth=depth, K=frame.K, iteration=self.track_iterations)
             mode = 'TRACK'
+            if np.isfinite(pose).all():
+                # track_one composes each refinement onto pose_last in float32 and never re-orthonormalizes: over
+                # ~3000 frames without a registration R^T R drifts past 1e-4 (viser_scene.rigid rejects the pose).
+                pose = orthonormal(pose)
+                last = estimator.pose_last
+                estimator.pose_last = self.torch.as_tensor(
+                    pose @ np.linalg.inv(estimator.get_tf_to_centered_mesh().cpu().numpy()), dtype=last.dtype,
+                    device=last.device)
         if pose is not None and np.isfinite(pose).all() and pose[2, 3] > 0:
             torch = self.torch
             # Render the centered mesh at its matching centered pose.
@@ -192,8 +221,7 @@ class GearTracker:
                 contours, _ = cv2.findContours(silhouette.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 cv2.drawContours(overlay, contours, -1, (0, 255, 0), 1)
                 overlay = self.draw_box(frame.K, img=overlay, ob_in_cam=pose, bbox=self.mesh.bounds)
-                overlay = self.draw_axis(overlay, ob_in_cam=pose, scale=.04, K=frame.K, thickness=2,
-                                         is_input_rgb=True)
+                overlay = draw_axis(overlay, pose, frame.K)
                 metrics['status'] = mode
             else:
                 pose = None

@@ -192,6 +192,12 @@ class RobotPanel:
                 except OSError:
                     pass
 
+    def episode_video(self):
+        """Video path of the policy episode running now (next to the server's episode_NNN.npz), or None."""
+        with self.lock:
+            episode = None if self.status is None else self.status.get('episode')
+        return None if episode is None else Path(episode + '.avi')
+
     def _run(self):
         stop = self.viewer.stop_event
         while not stop.is_set():

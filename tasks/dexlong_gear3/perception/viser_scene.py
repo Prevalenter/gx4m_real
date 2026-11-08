@@ -28,6 +28,17 @@ def reference_urdf(reference):
     return path if name and path.exists() else DEFAULT_URDF
 DEFAULT_INITIAL = HERE.parent / 'config/initial_pose.json'
 JOINTS = [f'joint{i}' for i in range(1, 8)]
+RATE_PERIOD = .5    # s between refreshes of the tracking-rate text
+
+
+def rate_text(record):
+    """Tracking rate of a live_gear36 record: frames per second, per-frame processing and camera-to-pose latency."""
+    text = f"{record['fps']:.1f} FPS"
+    if record.get('processing_ms') is not None:
+        text += f" · 每帧 {record['processing_ms']:.0f} ms"
+    if record.get('frame_age_ms') is not None:
+        text += f" · 延迟 {record['frame_age_ms']:.0f} ms"
+    return text
 
 
 def rigid(value):
@@ -149,6 +160,8 @@ class SceneViewer:
                          '机器人显示参考关节姿态，不读取或控制真机。相机光轴为 +Z。')
         gui.add_markdown('读取图像内参后更新视锥；没有内参时视锥仅作示意。')
         self.status = gui.add_text('检测状态', initial_value='等待检测', disabled=True)
+        self.rate = gui.add_text('追踪帧率', initial_value='—', disabled=True)
+        self.rate_shown = -np.inf     # monotonic time of the last rate text (refreshed every RATE_PERIOD)
         self.details = gui.add_markdown('')
         self.image = gui.add_image(np.zeros((480, 640, 3), dtype=np.uint8), label='相机 RGB')
         with gui.add_folder('机器人参考姿态（度）'):
@@ -188,6 +201,9 @@ class SceneViewer:
             self.details.content = ''
             status = record.get('status', '已载入检测结果')
             self.status.value = status
+            if record.get('fps') is not None and self.last_update - self.rate_shown >= RATE_PERIOD:
+                self.rate_shown = self.last_update
+                self.rate.value = rate_text(record)
             if rgb is not None:
                 self.image.image = rgb
                 self.frustum.image = rgb
@@ -222,6 +238,7 @@ class SceneViewer:
             if self.live and self.last_update is not None and (now or time.monotonic()) - self.last_update > self.stale_after:
                 self.part.visible = False
                 self.status.value = '检测结果已过期'
+                self.rate.value = '—'
                 self.details.content = '等待新的检测结果。'
 
     def _monitor(self):

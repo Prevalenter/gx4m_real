@@ -75,12 +75,18 @@ class SceneTests(unittest.TestCase):
             viewer.update(record)
             self.assertTrue(viewer.part.visible)
             np.testing.assert_allclose(viewer.part.position, world_object(self.calibration, pose)[:3, 3])
+            self.assertEqual(viewer.rate.value, '—')                       # no rate in the record yet
+            viewer.update(dict(record, fps=29.94, processing_ms=26.6, frame_age_ms=31.2))
+            self.assertEqual(viewer.rate.value, '29.9 FPS · 每帧 27 ms · 延迟 31 ms')
+            viewer.update(dict(record, fps=12., processing_ms=83., frame_age_ms=105.))
+            self.assertIn('29.9 FPS', viewer.rate.value)                    # refreshed at most every 0.5 s
             viewer.update({'status': 'SEARCHING', 'object_in_camera': None})
             self.assertFalse(viewer.part.visible)
             viewer.update(record)
             viewer.expire(time.monotonic() + 2)
             self.assertFalse(viewer.part.visible)
             self.assertIn('过期', viewer.status.value)
+            self.assertEqual(viewer.rate.value, '—')
             viewer.update({'object_in_camera': np.zeros((4, 4))})
             self.assertFalse(viewer.part.visible)
             self.assertIn('无效', viewer.status.value)

@@ -9,7 +9,8 @@ arm and hand as they are; only this process connects or disconnects them.
 It listens on 127.0.0.1:5702 (--listen) with a random authkey written to KEY_PATH (mode 0600), where the viewer
 reads it. Messages are gx4m_real.camera.frame_ipc headers without arrays:
   viewer -> server  {'type': 'command', 'action': one of ACTIONS}
-  server -> viewer  {'type': 'status', 'arm', 'hand', 'busy', 'message', 'q', 'stage', ...} at 10 Hz
+  server -> viewer  {'type': 'status', 'arm', 'hand', 'busy', 'message', 'q', 'stage', ...} at 10 Hz; while a policy
+                    episode runs, 'episode' is its log path without suffix, where the viewer records the video
 Gear poses arrive over UDP from step1_setup.py (its --target, default 127.0.0.1:5701), as for run_step1.py, and are
 converted with the same hand-eye result. Arm, hand, joint compensation and policy setup are run_step1.py's.
 
@@ -72,6 +73,7 @@ class RobotController:
         self.lock = threading.Lock()
         self.queue = queue.Queue()
         self.busy, self.message, self.hand_error, self.episodes = None, '就绪', None, 0
+        self.episode_path = None    # log path without suffix while a policy episode runs (the viewer's video)
         self.closing = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True, name='robot-controller')
         self.thread.start()
@@ -198,8 +200,12 @@ class RobotController:
         if not ok:
             raise RuntimeError(f'物体{message}')
         self.log(f'Policy episode {self.episodes}: gear at {np.round(T[:3, 3], 3)}')
-        outcome, rows = self.runner.episode()
         self.out.mkdir(parents=True, exist_ok=True)
+        self.episode_path = self.out.resolve()/f'episode_{self.episodes:03d}'
+        try:
+            outcome, rows = self.runner.episode()
+        finally:
+            self.episode_path = None
         path = self.out/f'episode_{self.episodes:03d}.npz'
         save_episode(path, rows, outcome)
         self.episodes += 1
@@ -228,6 +234,7 @@ class RobotController:
                 'arm': {'connected': arm['connected'], 'mode': arm['mode'], 'error': arm['error'], 'mock': arm['mock']},
                 'hand': {'connected': hand is not None, 'error': self.hand_error},
                 'stage': self.iface.stage if busy == 'run_policy' else None,
+                'episode': None if self.episode_path is None else str(self.episode_path),
                 'compensation_deg': list(self.arm.config.compensation.offsets_deg)}
 
     def close(self):

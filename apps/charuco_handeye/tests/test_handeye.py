@@ -340,11 +340,14 @@ class CollectToSolveTests(CollectorCase):
             self.assertIn('gx4m_link1', viewer.model.link_map)
             viewer._hand_loop(stop)
             self.assertEqual(viewer.hand_q['gx4m_joint16'], hand[15])
-            self.assertIn('16 +17.2°', viewer.hand_status.content)
+            self.assertIn('| 16 | +17.2° | 72.8° |', viewer.hand_status.content)   # URDF and raw servo angle
             stop.clear()
             viewer._joint_loop(stop)                    # an arm update keeps the hand angles
             self.assertEqual(viewer.hand_q['gx4m_joint1'], hand[0])
             np.testing.assert_allclose(viewer.arm_shown, sample['positions_rad'])
+            raw = np.degrees(motor[0])                  # before compensation, next to the model angle
+            self.assertIn(f'| J1 | {np.degrees(sample["positions_rad"][0]):+.2f}° | {raw:+.2f}° |',
+                          viewer.joint_status.content)
             stop.clear()
             viewer._tactile_loop(stop)                  # one failing sensor does not hide the other
             self.assertIn('| A | 30 | 10 | 3 | -1 / +2 / 9 |', viewer.tactile_status.content)
@@ -494,9 +497,60 @@ class GeometryTests(unittest.TestCase):
             check_motion(poses)
 
 
+class BasePoseTests(unittest.TestCase):
+    def test_task_base_pose_levels_the_plate(self):
+        """initial_pose.json and the beam1 reference give the same base; on it the URDF's base plate lies flat."""
+        import trimesh
+        from view_result import load_base_pose
+        config = ROOT/'tasks/dexlong_gear3/config'
+        T = load_base_pose(config/'initial_pose.json')
+        np.testing.assert_allclose(T, load_base_pose(config/'beam1_reference.json'), atol=1e-7)
+        plate = trimesh.load(ROOT/'asset/gx7_right/meshes/base_link.STL', force='mesh')
+        bottom = (plate.face_normals[:, 2] < -.98) & (plate.triangles_center[:, 2] < plate.bounds[0, 2] + .02)
+        normal = -(plate.face_normals[bottom]*plate.area_faces[bottom, None]).sum(0)
+        normal = T[:3, :3] @ normal/np.linalg.norm(normal)
+        self.assertLess(np.degrees(np.arccos(normal[2])), .5)
+
+
+class J1OffsetTests(unittest.TestCase):
+    def test_turning_j1_is_the_extrinsic_turn(self):
+        """FK with J1 + delta equals G @ FK, so the solve absorbs a J1 offset change as T_base_cam -> G T_base_cam."""
+        import yourdfpy
+        from view_result import joint1_turn
+        model = yourdfpy.URDF.load(str(DEFAULT_URDF), load_meshes=False)
+        q = dict(zip(JOINTS, [.3, -.4, .2, -1.1, .5, -.7, .9]))
+        model.update_cfg({n: q.get(n, 0.) for n in model.actuated_joint_names})
+        before = model.get_transform('Link7', 'base_link')
+        delta = np.radians(8.7)
+        model.update_cfg({n: q.get(n, 0.) + (delta if n == 'joint1' else 0.) for n in model.actuated_joint_names})
+        np.testing.assert_allclose(model.get_transform('Link7', 'base_link'),
+                                   joint1_turn(model, delta) @ before, atol=1e-12)
+
+    def test_save_writes_offset_extrinsic_and_yaml_line(self):
+        from view_result import save_joint_offsets
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            yaml_path = folder/'joint_compensation.yaml'
+            yaml_path.write_text('version: 1\njoints:\n'
+                                 + ''.join(f'  joint{i}:\n    direction: -1\n    offset_deg: {i}.5\n' for i in range(1, 8)))
+            result = folder/'handeye_result.json'
+            W, C = np.eye(4), np.eye(4)
+            W[:3, 3], C[:3, 3] = [1., 2., 3.], [.1, .2, .3]
+            result.write_text(json.dumps({'joint_compensation': {'directions': [-1]*7, 'offsets_deg': [1.5]*7,
+                                                                 'source': str(yaml_path)},
+                                          'T_world_base': W.tolist(), 'T_base_cam': np.eye(4).tolist()}))
+            save_joint_offsets(result, {1: 4.25, 3: -2.0}, C)
+            data = json.loads(result.read_text())
+            self.assertEqual(data['joint_compensation']['offsets_deg'], [4.25, 1.5, -2.0] + [1.5]*4)
+            np.testing.assert_allclose(data['T_base_cam'], C)
+            np.testing.assert_allclose(np.asarray(data['T_world_cam'])[:3, 3], [1.1, 2.2, 3.3])
+            loaded = JointCompensation.load(yaml_path)
+            self.assertEqual(loaded.offsets_deg, (4.25, 2.5, -2.0, 4.5, 5.5, 6.5, 7.5))
+
+
 class J7OffsetTests(unittest.TestCase):
     def test_save_writes_the_result_and_its_yaml(self):
-        from view_result import save_j7_offset
+        from view_result import save_joint_offsets
         with tempfile.TemporaryDirectory() as folder:
             folder = Path(folder)
             yaml_path = folder/'joint_compensation.yaml'
@@ -506,7 +560,7 @@ class J7OffsetTests(unittest.TestCase):
             result.write_text(json.dumps({'joint_compensation': {'directions': [-1]*7, 'offsets_deg': [1.5]*7,
                                                                  'source': str(yaml_path)}, 'other': 1}, indent=2))
             result.chmod(0o644)
-            save_j7_offset(result, -12.3)
+            save_joint_offsets(result, {7: -12.3})
             self.assertEqual(result.stat().st_mode & 0o777, 0o644)
             data = json.loads(result.read_text())
             self.assertEqual(data['joint_compensation']['offsets_deg'], [1.5]*6 + [-12.3])

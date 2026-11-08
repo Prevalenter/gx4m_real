@@ -26,7 +26,7 @@ from board import make_board
 from gx4m_real.camera.cloud import unproject
 from gx4m_real.camera.frame_ipc import receive, send
 from gx4m_real.robot.compensation import JointCompensation
-from gx4m_real.robot.hand import HAND_JOINTS, HandFeedbackReader
+from gx4m_real.robot.hand import DEG_PER_UNIT, HAND_JOINTS, HandFeedbackReader, load_hand_config, urdf_to_units
 from handeye_session import transform
 from solve_handeye import project
 
@@ -54,6 +54,17 @@ def poses_for_sample(result, sample):
         raise ValueError('Unknown calibration mode')
     return {'camera': W @ C, 'board': W @ B, 'flange': W @ E,
             'observed_board': W @ C @ transform(sample['T_cam_board'])}
+
+
+def load_base_pose(path):
+    """T_world_base from a task file: base_pos/base_quat (a training reference) or base_position/base_wxyz
+    (perception initial_pose.json), quaternions wxyz."""
+    d = json.loads(Path(path).read_text())
+    pos, quat = (d['base_pos'], d['base_quat']) if 'base_pos' in d else (d['base_position'], d['base_wxyz'])
+    T = np.eye(4)
+    T[:3, :3] = Rotation.from_quat(np.asarray(quat, float)[[1, 2, 3, 0]]).as_matrix()
+    T[:3, 3] = pos
+    return T
 
 
 def set_pose(handle, T):
@@ -135,24 +146,41 @@ def paxini_sensors(serial_numbers=None):
     return sensors
 
 
-J7_RANGE_DEG = 60.
+# Slider half-ranges (deg) around each joint's loaded offset: J7 is set by eye from scratch, the others are trims.
+OFFSET_RANGE_DEG = (20., 10., 10., 10., 10., 10., 60.)
 
 
-def save_j7_offset(result_path, offset_deg):
-    """Write the J7 offset into a calibration result's joint_compensation and, when it names one, the source
-    joint_compensation.yaml (only the joint7 offset_deg line changes, comments stay). Atomic per file."""
+def save_joint_offsets(result_path, offsets_deg, T_base_cam=None):
+    """Write {joint (1-7): offset_deg} into a calibration result's joint_compensation and, when it names one, the
+    source joint_compensation.yaml (only those joints' offset_deg lines change, comments stay); with T_base_cam
+    also the extrinsic and T_world_cam. Atomic per file."""
     result_path = Path(result_path)
     result = json.loads(result_path.read_text())
-    result['joint_compensation']['offsets_deg'][6] = round(float(offset_deg), 4)
+    for joint, offset in offsets_deg.items():
+        result['joint_compensation']['offsets_deg'][joint - 1] = round(float(offset), 4)
+    if T_base_cam is not None:
+        result['T_base_cam'] = np.asarray(T_base_cam, float).tolist()
+        result['T_world_cam'] = (transform(result['T_world_base']) @ np.asarray(T_base_cam, float)).tolist()
     source = result['joint_compensation'].get('source')
     if source and Path(source).exists():
         text = Path(source).read_text()
-        updated, count = re.subn(r'(joint7:\n(?:[ \t]+\S.*\n)*?[ \t]+offset_deg:[ \t]*)[-+0-9.eE]+',
-                                 lambda m: m.group(1) + repr(round(float(offset_deg), 4)), text, count=1)
-        if count != 1:
-            raise ValueError(f'No joint7 offset_deg in {source}')
-        atomic_write(Path(source), updated)
+        for joint, offset in offsets_deg.items():
+            text, count = re.subn(rf'(joint{joint}:\n(?:[ \t]+\S.*\n)*?[ \t]+offset_deg:[ \t]*)[-+0-9.eE]+',
+                                  lambda m: m.group(1) + repr(round(float(offset), 4)), text, count=1)
+            if count != 1:
+                raise ValueError(f'No joint{joint} offset_deg in {source}')
+        atomic_write(Path(source), text)
     atomic_write(result_path, json.dumps(result, indent=2) + '\n')
+
+
+def joint1_turn(model, delta_rad):
+    """G in base_link: the turn of everything after J1 when its zero offset changes by delta_rad. The eye-to-hand
+    solve absorbs it in the extrinsic, T_base_cam -> G @ T_base_cam (X C_i = F_i Y with F_i -> G F_i)."""
+    joint = model.joint_map['joint1']
+    axis = np.asarray(joint.axis, float)
+    turn = np.eye(4)
+    turn[:3, :3] = Rotation.from_rotvec(axis/np.linalg.norm(axis)*delta_rad).as_matrix()
+    return joint.origin @ turn @ np.linalg.inv(joint.origin)
 
 
 def atomic_write(path, text):
@@ -305,12 +333,18 @@ class ResultViewer:
     context manager, needs the camera), hand_factory() the dexterous hand with its read-only angles
     (a reader with read() -> 16 URDF radians; without it the hand is not drawn) and tactile_factory()
     the fingertip values ({label: open sensor with read_frame(), read_total() and close()}); every 2 s
-    tactile_labels(), when given, lists the labels now available, and a change reopens the sensors."""
+    tactile_labels(), when given, lists the labels now available, and a change reopens the sensors. base_pose (4x4)
+    replaces the session's T_world_base for display (load_base_pose)."""
 
     def __init__(self, result_path, *, host='127.0.0.1', port=8087, urdf=None,
                  pointcloud=None, cloud_stride=2, live=False, camera_factory=None, reader_factory=None,
-                 cloud_hz=5., gear_factory=None, hand_factory=None, tactile_factory=None, tactile_labels=None):
+                 cloud_hz=5., gear_factory=None, hand_factory=None, tactile_factory=None, tactile_labels=None,
+                 base_pose=None):
         self.result = json.loads(Path(result_path).read_text())
+        if base_pose is not None:
+            # Draw the robot (and the camera) on the task's base pose, as the deployment does, instead of the base
+            # pose recorded with the session; T_base_cam is unchanged. Only the display uses it.
+            self.result['T_world_base'] = np.asarray(base_pose, float).tolist()
         self.samples = self.result['samples']
         if not self.samples:
             raise ValueError('Result contains no calibration samples')
@@ -345,6 +379,7 @@ class ResultViewer:
         self.cloud = None
         self.lock = threading.RLock()
         self.gear_factory, self.hand_factory, self.tactile_factory = gear_factory, hand_factory, tactile_factory
+        self.hand_directions = load_hand_config()['directions'] if hand_factory is not None else None
         self.tactile_labels = tactile_labels
         self.latest_frame = None
         self.frame_ready = threading.Condition()
@@ -434,7 +469,7 @@ class ResultViewer:
                                 self.cloud.visible = event.target.value
                     w, h = self.result['image_size']
                     self.live_image = gui.add_image(np.zeros((h, w, 3), dtype=np.uint8), label='实时 RGB')
-            self.j7_panel(gui, Path(result_path))
+            self.offsets_panel(gui, Path(result_path))
         if gear_factory is not None:
             self.T_world_cam = transform(self.result['T_world_base']) @ transform(self.result['T_base_cam'])
             gear = trimesh.load(GEAR24_MESH, force='mesh')
@@ -517,8 +552,12 @@ class ResultViewer:
         with self.lock:
             self.hand_q = dict(zip(HAND_JOINTS, q))
             self.set_robot(self.arm_shown)
-            self.hand_status.content = (f"灵巧手（URDF 角，{datetime.now():%H:%M:%S}）：" +
-                                        ' · '.join(f'{i} {v:+.1f}°' for i, v in enumerate(np.degrees(q), 1)))
+            # The hand has no zero compensation: the raw servo angle (reading x DEG_PER_UNIT) only loses 90 deg
+            # and takes the joint direction on the way to the URDF angle.
+            servo = urdf_to_units(q, self.hand_directions)*DEG_PER_UNIT
+            self.hand_status.content = (
+                f"灵巧手（{datetime.now():%H:%M:%S}）\n\n| 关节 | URDF 角 | 舵机原始角（无补偿） |\n|---|---|---|\n" +
+                '\n'.join(f'| {i} | {v:+.1f}° | {r:.1f}° |' for i, (v, r) in enumerate(zip(np.degrees(q), servo), 1)))
 
     def show_tactile(self, readings):
         """readings: {label: (frame (135, 3) or None, total (3,) or None, error or None)}."""
@@ -573,42 +612,60 @@ class ResultViewer:
                 self.hand_status.content = f'灵巧手读取失败：{exc}（{RETRY_SEC:g} 秒后重试；模型保持上次姿态）'
                 stop.wait(RETRY_SEC)
 
-    def j7_panel(self, gui, result_path):
-        """A slider for the J7 zero offset, applied to the live arm at once; save writes it into the calibration
-        result (the compensation the deployment reads) and its joint_compensation.yaml. J7 turns the flange about
-        its own axis, which the board-on-flange solve absorbs in T_flange_board: T_base_cam stays valid."""
-        saved = lambda: float(json.loads(result_path.read_text())['joint_compensation']['offsets_deg'][6])
-        with gui.add_folder('J7 零位补偿'):
-            gui.add_markdown('拖动后模型的手立刻绕 J7 转，对照点云调到重合再保存。保存写入标定结果的关节补偿，'
-                             '部署（控制进程、主循环）重启后使用；手眼外参不受 J7 影响。')
-            slider = gui.add_slider('J7 补偿 (°)', min=-J7_RANGE_DEG, max=J7_RANGE_DEG, step=.1,
-                                    initial_value=self.compensation.offsets_deg[6])
+    def offsets_panel(self, gui, result_path):
+        """A slider per joint zero offset (J1-J7), applied to the live arm at once. J1 turns the arm after J1 and the
+        extrinsic together about the J1 axis (joint1_turn: the solve absorbs it), so only base_link turns against
+        the cloud; J7 turns the flange, absorbed in T_flange_board; J2-J6 move the arm against a fixed camera (the
+        extrinsic was solved with the saved values: re-solve after saving them). Save writes the changed offsets
+        (and the J1-turned T_base_cam) into the result and its joint_compensation.yaml."""
+        saved = lambda: json.loads(result_path.read_text())['joint_compensation']['offsets_deg']
+        loaded, base_cam = list(self.compensation.offsets_deg), transform(self.result['T_base_cam'])
+        with gui.add_folder('关节零位补偿'):
+            gui.add_markdown('拖动后模型立刻按新补偿显示。J1：J1 之后的机械臂连同手眼外参一起绕 J1 轴转（标定里两者等价），'
+                             '只有底座相对点云转；J7：手绕法兰转，外参不变；J2–J6：只动机械臂、相机不动，用来对照点云，'
+                             '但外参是按原补偿求的，保存后要按新补偿重新求解外参。保存写入标定结果和它的 '
+                             'joint_compensation.yaml，部署（控制进程、主循环）重启后使用。标定样本的板位姿按原补偿记录。')
+            sliders = [gui.add_slider(f'J{i} 补偿 (°)', min=v - r, max=v + r, step=.1, initial_value=v)
+                       for i, (v, r) in enumerate(zip(loaded, OFFSET_RANGE_DEG), 1)]
             status = gui.add_markdown('')
             save, reload = gui.add_button('保存', color='green'), gui.add_button('恢复已保存')
 
-        def show(note=''):
-            state = '已保存' if abs(slider.value - saved()) < 1e-9 else '**未保存**'
-            status.content = (f'当前 J7 补偿 {slider.value:+.1f}°（{state}；文件里 {saved():+.1f}°）\n\n'
-                              f'文件：`{result_path}`' + (f'\n\n{note}' if note else ''))
+        def camera_for(j1):
+            return joint1_turn(self.model, np.radians(j1 - loaded[0])) @ base_cam
 
-        @slider.on_update
-        def _(_):
-            offsets = list(self.compensation.offsets_deg)
-            offsets[6] = float(slider.value)
+        def show(note=''):
+            stored = saved()
+            rows = [f'J{i} {s.value:+.2f}°' + ('' if abs(s.value - v) < 1e-9 else f'（**未保存**，文件里 {v:+.2f}°）')
+                    for i, (s, v) in enumerate(zip(sliders, stored), 1)]
+            changed = [i for i, (s, v) in enumerate(zip(sliders, stored), 1) if 1 < i < 7 and abs(s.value - v) > 1e-9]
+            warn = f'\n\nJ{"、J".join(map(str, changed))} 改了：外参需按新补偿重新求解。' if changed else ''
+            status.content = ' · '.join(rows) + f'\n\n文件：`{result_path}`' + warn + (f'\n\n{note}' if note else '')
+
+        def apply(_):
             with self.lock:
-                self.compensation = JointCompensation(self.compensation.directions, tuple(offsets))
+                self.compensation = JointCompensation(self.compensation.directions,
+                                                      tuple(float(s.value) for s in sliders))
+                self.result['T_base_cam'] = camera_for(sliders[0].value).tolist()
                 if self.live_motor is not None:
                     self.show_joints(self.live_motor)
+            self.refresh()
             show()
+
+        for slider in sliders:
+            slider.on_update(apply)
 
         @save.on_click
         def _(_):
-            save_j7_offset(result_path, float(slider.value))
-            show(f'已保存（{datetime.now():%H:%M:%S}）')
+            stored = saved()
+            changed = {i: s.value for i, (s, v) in enumerate(zip(sliders, stored), 1) if abs(s.value - v) > 1e-9}
+            if changed:
+                save_joint_offsets(result_path, changed, camera_for(sliders[0].value) if 1 in changed else None)
+            show(f'已保存（{datetime.now():%H:%M:%S}）' if changed else '没有改动')
 
         @reload.on_click
         def _(_):
-            slider.value = saved()
+            for slider, v in zip(sliders, saved()):
+                slider.value = v
             show('已恢复为文件里的值')
 
         show()
@@ -620,8 +677,11 @@ class ResultViewer:
             self.live_motor = motor_positions
             self.live_q = q
             self.set_robot(q)
-            self.joint_status.content = (f"关节（模型角，{datetime.now():%H:%M:%S}）：" +
-                                         ' · '.join(f'J{i} {v:+.1f}°' for i, v in enumerate(np.degrees(q), 1)))
+            offsets = self.compensation.offsets_deg
+            self.joint_status.content = (
+                f"机械臂（{datetime.now():%H:%M:%S}）\n\n| 关节 | 补偿后（模型角） | 补偿前（电机角） | 补偿 |\n|---|---|---|---|\n" +
+                '\n'.join(f'| J{i} | {v:+.2f}° | {m:+.2f}° | {o:+.2f}° |' for i, (v, m, o) in
+                          enumerate(zip(np.degrees(q), np.degrees(motor_positions), offsets), 1)))
 
     def show_frame(self, frame):
         points, colors = cloud_from_rgbd(frame.rgb, frame.depth, frame.K, self.cloud_stride)
@@ -742,6 +802,10 @@ def main():
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8087)
     parser.add_argument('--urdf', type=Path, help='Override moved URDF path')
+    parser.add_argument('--base-pose', type=Path,
+                        help="Draw the robot on this task file's base pose (training reference base_pos/base_quat or "
+                             'perception initial_pose.json) instead of the session\'s recorded base, e.g. '
+                             'tasks/dexlong_gear3/config/initial_pose.json: its tilt levels the base plate')
     scene = parser.add_mutually_exclusive_group()
     scene.add_argument('--pointcloud', type=Path, help='Current capture_rgbd.py output directory (fixed camera only)')
     scene.add_argument('--live', action='store_true',
@@ -760,12 +824,11 @@ def main():
     parser.add_argument('--robot-server', metavar='HOST:PORT', nargs='?', const='127.0.0.1:5702',
                         help='With --live: take the arm and hand angles from the running '
                              'tasks/dexlong_gear3/robot_server.py (it holds CAN and the hand port) instead of '
-                             'reading them; read-only')
+                             'reading them; read-only. With --hand-port the hand is read from that port instead '
+                             '(disconnect the hand in the server first, which turns its torque off and frees the port)')
     args = parser.parse_args()
     if args.robot_server and not args.live:
         parser.error('--robot-server needs --live')
-    if args.robot_server and args.hand_port:
-        parser.error('--robot-server already gives the hand angles; leave out --hand-port')
     if (args.gear24 or args.no_cloud or args.hand_port or args.tactile is not None) and not args.live:
         parser.error('--gear24, --no-cloud, --hand-port and --tactile need --live')
     if args.gear24 and args.no_cloud:
@@ -777,7 +840,8 @@ def main():
         host, port = args.robot_server.rsplit(':', 1)
         directions = json.loads(args.result.read_text())['joint_compensation']['directions']
         feed = ServerFeed((host, int(port)), directions)
-        reader_factory, hand_factory = lambda: FeedReader(feed.arm_motor), lambda: FeedReader(feed.hand)
+        reader_factory = lambda: FeedReader(feed.arm_motor)
+        hand_factory = hand_factory or (lambda: FeedReader(feed.hand))
     ResultViewer(args.result, host=args.host, port=args.port, urdf=args.urdf,
                  pointcloud=args.pointcloud, cloud_stride=args.cloud_stride, live=args.live,
                  camera_factory=None if args.no_cloud else lambda: orbbec_stream(args.camera_device_index),
@@ -785,7 +849,8 @@ def main():
                  gear_factory=(lambda stop: GearWorker(command, cancel=stop)) if args.gear24 else None,
                  hand_factory=hand_factory,
                  tactile_factory=None if args.tactile is None else lambda: paxini_sensors(args.tactile or None),
-                 tactile_labels=lambda: paxini_labels(args.tactile or None)).run()
+                 tactile_labels=lambda: paxini_labels(args.tactile or None),
+                 base_pose=load_base_pose(args.base_pose) if args.base_pose else None).run()
 
 
 if __name__ == '__main__':

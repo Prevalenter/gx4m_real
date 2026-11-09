@@ -70,12 +70,15 @@ def reference_urdf(reference):
     return path if name and path.exists() else URDF
 
 
-def start_check(reference, pos, quat, z_tolerance=.005):
+def start_check(reference, pos, quat, z_tolerance=.005, xy_tolerance=None):
     """(ok, message in Chinese) for an object pose against the trained start. The gears started anywhere within
     +-2 cm in x and y at any yaw (reset_position_noise, randomized yaw); lift references started at one fixed pose,
-    so the beam must lie within +-1 cm and 10 deg of it (a guess: the policy never saw another start)."""
+    so the beam must lie within +-1 cm and 10 deg of it (a guess: the policy never saw another start).
+    xy_tolerance (m) replaces those x, y limits."""
     fixed = reference.get('lift') is not None
     xy, angle_limit = (.01, 10.) if fixed else (.02, None)
+    if xy_tolerance is not None:
+        xy = xy_tolerance
     offset = np.asarray(pos, dtype=np.float64) - reference['object_pos']
     text = (f"x {offset[0]*1000:+.0f}、y {offset[1]*1000:+.0f}、z {offset[2]*1000:+.0f} mm"
             f"（x、y 各 ±{xy*1000:.0f} mm，z ±{z_tolerance*1000:.0f} mm")

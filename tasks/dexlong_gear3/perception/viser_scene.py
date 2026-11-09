@@ -195,12 +195,11 @@ class SceneViewer:
             raise ValueError('Camera serial differs from the fixed-camera calibration')
 
     def update(self, record, *, rgb=None, K=None):
+        # Each property is sent once per frame with its final value, and only when it changes: hiding the part and
+        # clearing the text first and restoring them further down made the browser flicker at 30 Hz.
         with self.lock:
             self.last_update = time.monotonic()
-            self.part.visible = False
-            self.details.content = ''
             status = record.get('status', '已载入检测结果')
-            self.status.value = status
             if record.get('fps') is not None and self.last_update - self.rate_shown >= RATE_PERIOD:
                 self.rate_shown = self.last_update
                 self.rate.value = rate_text(record)
@@ -213,25 +212,30 @@ class SceneViewer:
                     raise ValueError('Invalid image intrinsics')
                 self.frustum.fov = 2 * np.arctan(rgb.shape[0] / (2 * K[1, 1]))
                 self.frustum.aspect = rgb.shape[1] / rgb.shape[0]
-            pose = record.get('object_in_camera')
+            pose, world, details = record.get('object_in_camera'), None, ''
             if pose is None or status.startswith(('SEARCHING', 'LOST')):
-                self.details.content = '当前无有效零件位姿。'
-                return
-            try:
-                pose = rigid(pose)
-                if pose[2, 3] <= 0:
-                    raise ValueError('Object origin is behind the camera')
-                world = world_object(self.calibration, pose)
-            except ValueError as exc:
-                self.status.value = f'无效位姿：{exc}'
-                return
-            set_pose(self.part, world)
-            self.part.visible = True
-            self.details.content = (
-                f"相机世界位置：{self.T_world_cam[:3, 3].round(4).tolist()} m\n\n"
-                f"零件世界位置：{world[:3, 3].round(4).tolist()} m\n\n"
-                f"零件世界四元数 wxyz：{Rotation.from_matrix(world[:3, :3]).as_quat()[[3, 0, 1, 2]].round(5).tolist()}\n\n"
-                + symmetry_note(self.gear_name))
+                details = '当前无有效零件位姿。'
+            else:
+                try:
+                    pose = rigid(pose)
+                    if pose[2, 3] <= 0:
+                        raise ValueError('Object origin is behind the camera')
+                    world = world_object(self.calibration, pose)
+                except ValueError as exc:
+                    status = f'无效位姿：{exc}'
+            if world is not None:
+                set_pose(self.part, world)
+                details = (
+                    f"相机世界位置：{self.T_world_cam[:3, 3].round(4).tolist()} m\n\n"
+                    f"零件世界位置：{world[:3, 3].round(4).tolist()} m\n\n"
+                    f"零件世界四元数 wxyz：{Rotation.from_matrix(world[:3, :3]).as_quat()[[3, 0, 1, 2]].round(5).tolist()}\n\n"
+                    + symmetry_note(self.gear_name))
+            if self.status.value != status:
+                self.status.value = status
+            if self.part.visible != (world is not None):
+                self.part.visible = world is not None
+            if self.details.content != details:
+                self.details.content = details
 
     def expire(self, now=None):
         with self.lock:

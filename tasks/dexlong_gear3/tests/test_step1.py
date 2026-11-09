@@ -371,6 +371,7 @@ class BeamLiftRolloutTests(unittest.TestCase):
         pos, quat = np.array(self.reference['object_pos']), np.asarray(self.reference['object_quat'])
         self.assertTrue(start_check(self.reference, pos + [.008, -.008, .003], quat)[0])
         self.assertFalse(start_check(self.reference, pos + [.015, 0, 0], quat)[0])
+        self.assertTrue(start_check(self.reference, pos + [.045, -.03, .04], quat, .05, .05)[0])   # widened to 5 cm
         self.assertFalse(start_check(self.reference, pos, quat_mul(quat, [0., 0., 0., 1.]))[0])   # turned 180 deg
 
 

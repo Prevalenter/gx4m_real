@@ -60,7 +60,8 @@ BUTTONS = (('connect_arm', '连接机械臂（使能，保持当前位置）', N
            ('disconnect_arm', '断开机械臂（失能，先扶住）', None),
            ('connect_hand', '连接灵巧手（使能，保持当前姿态）', None),
            ('disconnect_hand', '断开灵巧手（扭矩关闭）', None),
-           ('tare_tactile', '触觉去皮（手指悬空时）', None))
+           ('tare_tactile', '触觉去皮（手指悬空时）', None),
+           ('reconnect_tactile', '重新连接触觉（插好线后点）', None))
 
 
 class Feed:

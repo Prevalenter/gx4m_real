@@ -48,6 +48,8 @@ def enabled_actions(status):
     actions = {'disconnect_arm'} if arm['connected'] else {'connect_arm'}
     if isinstance(status.get('tactile'), list):
         actions.add('tare_tactile')
+    if status.get('tactile') is not None:      # open, failing or unplugged: reopen it
+        actions.add('reconnect_tactile')
     actions.add('disconnect_hand' if hand['connected'] else 'connect_hand')
     if hand['connected']:
         actions.add('hand_home')
@@ -180,6 +182,9 @@ class RobotPanel:
             button = gui.add_button('触觉去皮（手指不碰任何东西时点）', disabled=True)
             button.on_click(lambda _: self.send('tare_tactile'))
             self.buttons['tare_tactile'] = button
+            button = gui.add_button('重新连接触觉（插好线后点）', disabled=True)
+            button.on_click(lambda _: self.send('reconnect_tactile'))
+            self.buttons['reconnect_tactile'] = button
         self.thread = threading.Thread(target=self._run, daemon=True, name='robot-panel')
         self.thread.start()
 

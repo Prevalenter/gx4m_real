@@ -241,22 +241,22 @@ class Step1Setup(SceneViewer):
                 self.check.content = '齿轮位姿已过期，检查暂停。'
 
 
-def lift_start_report(position, rotation, reference):
-    """Beam-at-start errors (m, deg) of an env-frame pose against the trained start pose."""
+def lift_start_report(position, rotation, reference, xy=LIFT_START_XY, z=START_Z):
+    """Beam-at-start errors (m, deg) of an env-frame pose against the trained start pose; ok within xy, z (m)."""
     start = pose(reference['object_pos'], reference['object_quat'])
     d = np.asarray(position) - start[:3, 3]
     relative = start[:3, :3].T @ rotation
     angle = float(np.degrees(np.arccos(np.clip((np.trace(relative) - 1)/2, -1., 1.))))
     yaw = float(np.degrees(np.arctan2(relative[1, 0], relative[0, 0])))
-    ok = max(abs(d[0]), abs(d[1])) <= LIFT_START_XY and abs(d[2]) <= START_Z and angle <= LIFT_START_ANGLE
-    return dict(dx=d[0], dy=d[1], dz=d[2], angle=angle, yaw=yaw, ok=bool(ok))
+    ok = max(abs(d[0]), abs(d[1])) <= xy and abs(d[2]) <= z and angle <= LIFT_START_ANGLE
+    return dict(dx=d[0], dy=d[1], dz=d[2], angle=angle, yaw=yaw, ok=bool(ok), xy=xy, z=z)
 
 
 def lift_report_markdown(r):
     mm = lambda v: f'{v*1000:+.1f} mm'
     return (f"**起点（横梁平放在桌上）** {'✅' if r['ok'] else '❌'}\n\n"
-            f"x {mm(r['dx'])}，y {mm(r['dy'])}（各 ≤ ±{LIFT_START_XY*1000:.0f} mm），高度 {mm(r['dz'])}"
-            f"（≤ {START_Z*1000:.0f} mm），朝向差 {r['angle']:.1f}°（≤ {LIFT_START_ANGLE:.0f}°，其中绕自身 z 偏航 "
+            f"x {mm(r['dx'])}，y {mm(r['dy'])}（各 ≤ ±{r['xy']*1000:.0f} mm），高度 {mm(r['dz'])}"
+            f"（≤ {r['z']*1000:.0f} mm），朝向差 {r['angle']:.1f}°（≤ {LIFT_START_ANGLE:.0f}°，其中绕自身 z 偏航 "
             f"{r['yaw']:+.1f}°）\n\n"
             + ('' if r['ok'] else f"横梁按 x {mm(-r['dx'])}、y {mm(-r['dy'])} 移动（世界坐标轴），"
                f"偏航转 {-r['yaw']:+.1f}°。\n\n"))
@@ -265,7 +265,9 @@ def lift_report_markdown(r):
 class LiftSetup(SceneViewer):
     """Lift references (the beam): the trained start (yellow) and lift goal (green), and the start check."""
 
-    def __init__(self, calibration, *, reference, history=15, gear='beam2', **kwargs):
+    def __init__(self, calibration, *, reference, history=15, gear='beam2', start_xy=LIFT_START_XY, start_z=START_Z,
+                 **kwargs):
+        self.start_xy, self.start_z = start_xy, start_z
         kwargs.setdefault('urdf', reference_urdf(reference))
         super().__init__(calibration, gear=gear, **kwargs)
         self.ref, self.history = reference, deque(maxlen=history)
@@ -278,7 +280,7 @@ class LiftSetup(SceneViewer):
         mesh_handle(self.server, '/sim/start_part', part, (240, 200, 40), .35, start)
         mesh_handle(self.server, '/sim/goal_part', part, (40, 200, 90), .35, goal)
         scene = self.server.scene
-        scene.add_label('/sim/start_label', f'起点 ±{LIFT_START_XY*100:.0f} cm', position=start[:3, 3] + [0, 0, .05])
+        scene.add_label('/sim/start_label', f'起点 ±{self.start_xy*100:.0f} cm', position=start[:3, 3] + [0, 0, .05])
         scene.add_label('/sim/goal_label', f'抬起目标（起点上方 {height*100:.0f} cm）', position=goal[:3, 3] + [0, 0, .05])
         end = start[:3, :3] @ marked_end(gear, part) + start[:3, 3]
         scene.add_icosphere('/sim/marked_end', radius=.008, color=DISPLAY_RGB[END_MARKER], position=end)
@@ -300,7 +302,8 @@ class LiftSetup(SceneViewer):
             self.history.append(world_object(self.calibration, record['object_in_camera']))
             poses = np.asarray(self.history)
             rotation = Rotation.from_matrix(poses[:, :3, :3]).mean().as_matrix()
-            self.report = lift_start_report(np.median(poses[:, :3, 3], axis=0), rotation, self.ref)
+            self.report = lift_start_report(np.median(poses[:, :3, 3], axis=0), rotation, self.ref, self.start_xy,
+                                            self.start_z)
             self.check.content = lift_report_markdown(self.report) + f'（最近 {len(self.history)} 帧中位数）'
 
     def expire(self, now=None):
@@ -371,6 +374,10 @@ def main(argv=None):
                         help="robot_server.py behind the robot buttons ('' to hide them)")
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8088)
+    parser.add_argument('--start-xy-tolerance', type=float, default=LIFT_START_XY,
+                        help='m: beam x, y off the trained start shown as OK (match robot_server.py)')
+    parser.add_argument('--start-z-tolerance', type=float, default=START_Z,
+                        help='m: beam height off the trained start shown as OK (match robot_server.py)')
     args, inference_args = parser.parse_known_args(argv)
     if not args.demo and args.calibration is None:
         parser.error('--calibration is required (or --demo)')
@@ -391,6 +398,7 @@ def main(argv=None):
     lift = reference.get('lift') is not None
     if lift:
         viewer = LiftSetup(calibration, reference=reference, gear=gear, initial=initial, host=args.host,
+                           start_xy=args.start_xy_tolerance, start_z=args.start_z_tolerance,
                            port=args.port, live=not args.demo)
     else:
         viewer = Step1Setup(calibration, reference=reference, plate=plate, gear=gear, initial=initial, host=args.host,

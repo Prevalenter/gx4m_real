@@ -54,7 +54,7 @@ KEY_PATH = Path(os.environ.get('XDG_RUNTIME_DIR') or tempfile.gettempdir())/'gx4
 ACTIONS = {'connect_arm': '连接机械臂', 'disconnect_arm': '断开机械臂', 'connect_hand': '连接灵巧手',
            'disconnect_hand': '断开灵巧手', 'release': '进入拖动模式', 'hold': '退出拖动模式',
            'arm_home': '机械臂回初始位置', 'hand_home': '灵巧手回初始位置', 'run_policy': '执行策略', 'stop': '停止',
-           'tare_tactile': '触觉去皮'}
+           'tare_tactile': '触觉去皮', 'reconnect_tactile': '重新连接触觉'}
 START_Z_TOLERANCE = .005  # m: the gear lies flat on the table at the trained start height
 START_POSE_AGE = .3     # s: the policy starts only on a pose this fresh; once running, --max-pose-age applies
 OUTCOMES = {'success': '成功', 'stopped': '已停止', 'pose_lost': '齿轮位姿丢失', 'tracking_error': '机械臂跟不上目标',
@@ -65,9 +65,12 @@ OUTCOMES = {'success': '成功', 'stopped': '已停止', 'pose_lost': '齿轮位
 class RobotController:
     """Runs viewer actions on the runner's arm and hand; the hand is opened by connect_hand (hand_factory())."""
 
-    def __init__(self, runner, hand_factory, out, *, start_z_tolerance=START_Z_TOLERANCE, log=print):
+    def __init__(self, runner, hand_factory, out, *, start_z_tolerance=START_Z_TOLERANCE, start_xy_tolerance=None,
+                 tactile_factory=None, log=print):
+        """tactile_factory() opens and tares the fingertips again (reconnect_tactile); None: no tactile at all."""
         self.runner, self.arm, self.hand_factory, self.out, self.log = runner, runner.arm, hand_factory, out, log
-        self.start_z_tolerance = start_z_tolerance
+        self.start_z_tolerance, self.start_xy_tolerance = start_z_tolerance, start_xy_tolerance
+        self.tactile_factory = tactile_factory
         self.iface = runner.iface
         runner.hand = None
         self.lock = threading.Lock()
@@ -144,6 +147,20 @@ class RobotController:
         offset = self.runner.tactile.tare(.5)
         return '触觉已去皮，零点 ' + ', '.join(f'{f:.1f}' for f in offset) + ' N（拇指、食指、中指、无名指）'
 
+    def reconnect_tactile(self):
+        """Close the fingertip sensors (a pulled cable leaves their ports dead) and open and tare them again."""
+        if self.tactile_factory is None:
+            raise RuntimeError('控制进程没有打开触觉（--no-tactile 或 --mock）')
+        old, self.runner.tactile = self.runner.tactile, None
+        if old is not None:
+            try:
+                old.close()
+            except Exception:
+                pass
+        tactile = self.tactile_factory()
+        self.runner.tactile = tactile
+        return '触觉已重新连接，零点 ' + ', '.join(f'{f:.1f}' for f in tactile.offset) + ' N（拇指、食指、中指、无名指）'
+
     def disconnect_hand(self):
         hand, self.runner.hand = self.runner.hand, None
         if hand is not None:
@@ -183,6 +200,8 @@ class RobotController:
 
     def run_policy(self):
         self._require(hand=True)
+        if self.tactile_factory is not None and self.runner.tactile is None:
+            raise RuntimeError('触觉没有连接：插好线后点“重新连接触觉”')
         if self.arm.mode == 'released':
             raise RuntimeError('机械臂在拖动模式，先回初始位置')
         q = self.runner.joints()
@@ -196,7 +215,8 @@ class RobotController:
         T, age = self.runner.gear_pose(q)
         if T is None or age > START_POSE_AGE:
             raise RuntimeError('没有齿轮位姿' if np.isinf(age) else f'齿轮位姿已过期（{age:.2f} s）')
-        ok, message = start_check(self.iface.ref, T[:3, 3], matrix_quat(T[:3, :3]), self.start_z_tolerance)
+        ok, message = start_check(self.iface.ref, T[:3, 3], matrix_quat(T[:3, :3]), self.start_z_tolerance,
+                                  self.start_xy_tolerance)
         if not ok:
             raise RuntimeError(f'物体{message}')
         self.log(f'Policy episode {self.episodes}: gear at {np.round(T[:3, 3], 3)}')
@@ -223,6 +243,8 @@ class RobotController:
         with self.lock:
             busy, message = self.busy, self.message
         tactile = threshold = None
+        if self.runner.tactile is None and self.tactile_factory is not None:
+            tactile = '未连接：插好线后点“重新连接触觉”'
         if self.runner.tactile is not None:
             threshold = self.runner.tactile.threshold_n
             try:
@@ -303,6 +325,8 @@ def main(argv=None):
     parser.add_argument('--start-z-tolerance', type=float, default=START_Z_TOLERANCE,
                         help='m: gear height off the trained start that still allows a policy start (a wrong base '
                              'height shows up here; raising it only lets the policy run on the wrong height)')
+    parser.add_argument('--start-xy-tolerance', type=float,
+                        help='m: x, y off the trained start that still allows a policy start (default: step1.start_check)')
     add_tactile_args(parser)
     parser.add_argument('--out', type=Path, help='Directory for episode logs (default: runs/step<n>_<time>)')
     args = parser.parse_args(argv)
@@ -315,7 +339,12 @@ def main(argv=None):
     arm = ArmDriver(config, mock=args.mock)
     gear = UdpGearPose(args.pose_port)
     camera = CameraToEnv(args.handeye, iface) if args.handeye else CameraToEnv()
-    tactile = open_tactile(args, iface)
+    tactile_factory = None if args.mock or args.no_tactile else (lambda: open_tactile(args, iface))
+    try:
+        tactile = open_tactile(args, iface)
+    except Exception as exc:        # a pulled cable: run without, the viewer reconnects (reconnect_tactile)
+        print(f'WARNING: tactile not opened ({exc}); plug it in and press 重新连接触觉 in the viewer')
+        tactile = None
     runner = Step1Runner(iface, actor, arm, None, gear, camera, tactile=tactile, arm_speed_scale=args.arm_speed_scale,
                          max_pose_age=args.max_pose_age, max_tactile_age=args.max_tactile_age,
                          max_tracking_error=args.max_tracking_error, approach_speed=args.approach_speed,
@@ -323,7 +352,8 @@ def main(argv=None):
     out = args.out or HERE/'runs'/datetime.now().strftime(f'step{args.step}_%Y%m%d_%H%M%S'.replace('stepbeam', 'beam'))
     controller = RobotController(
         runner, lambda: HandDriver(args.hand_port, serial_number=args.hand_serial, mock=args.mock), out,
-        start_z_tolerance=args.start_z_tolerance)
+        start_z_tolerance=args.start_z_tolerance, start_xy_tolerance=args.start_xy_tolerance,
+        tactile_factory=tactile_factory)
     host, port = args.listen.rsplit(':', 1)
     key = write_key()
     print(f'Robot server on {host}:{port} (key {KEY_PATH}); arm PVT limit {config.velocity_limit:.2f} rad/s, '
@@ -336,8 +366,8 @@ def main(argv=None):
         controller.close()
         KEY_PATH.unlink(missing_ok=True)
         gear.close()
-        if tactile is not None:
-            tactile.close()
+        if runner.tactile is not None:       # the current sensors (reconnect_tactile closes the old ones)
+            runner.tactile.close()
         if arm.robot is not None:
             try:
                 if arm.mode != 'fault':

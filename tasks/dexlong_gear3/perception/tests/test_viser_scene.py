@@ -93,6 +93,27 @@ class SceneTests(unittest.TestCase):
         finally:
             viewer.close()
 
+    def test_tracked_frames_do_not_toggle_the_part(self):
+        """Hiding the part and showing it again within one update made the page flicker at 30 Hz."""
+        viewer = SceneViewer(self.calibration, initial=self.initial, port=0, live=True)
+        try:
+            class Part:
+                visible, position, wxyz, sets = False, None, None, 0
+
+                def __setattr__(self, name, value):
+                    if name == 'visible':
+                        type(self).sets += 1
+                    object.__setattr__(self, name, value)
+
+            viewer.part = Part()
+            record = {'status': 'TRACK', 'object_in_camera': make_transform([.01, .02, .5], 10).tolist()}
+            for _ in range(5):
+                viewer.update(record)
+            self.assertTrue(viewer.part.visible)
+            self.assertEqual(Part.sets, 1)                       # shown once, never hidden in between
+        finally:
+            viewer.close()
+
     def test_camera_serial_mismatch_rejected(self):
         self.calibration['camera_metadata'] = {'serial': 'expected'}
         viewer = SceneViewer(self.calibration, initial=self.initial, port=0)

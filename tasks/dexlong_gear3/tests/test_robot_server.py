@@ -98,6 +98,37 @@ class ControllerTests(unittest.TestCase):
         s = self.run_action(c, 'disconnect_arm')
         self.assertEqual((s['arm']['connected'], s['q']), (False, {}))
 
+    def test_tactile_reconnect(self):
+        c = self.controller()
+
+        class Tactile:
+            threshold_n, offset, closed = .3, np.array([.5, 0., .1, 0.]), False
+
+            def forces(self):
+                return np.zeros(4)
+
+            def close(self):
+                self.closed = True
+
+        opened = []
+        c.tactile_factory = lambda: opened.append(Tactile()) or opened[-1]
+        status = c.status()                                      # started with the cable out
+        self.assertIn('未连接', status['tactile'])
+        self.assertIn('reconnect_tactile', enabled_actions(status))
+        self.assertNotIn('tare_tactile', enabled_actions(status))
+        s = self.run_action(c, 'reconnect_tactile')
+        self.assertIn('零点 0.5, 0.0, 0.1, 0.0 N', s['message'])
+        self.assertEqual(s['tactile'], [0.]*4)
+        s = self.run_action(c, 'reconnect_tactile')                  # again: the dead sensors are closed first
+        self.assertTrue(opened[0].closed)
+        self.assertIs(c.runner.tactile, opened[1])
+        c.runner.tactile = None
+        self.run_action(c, 'connect_arm')
+        self.run_action(c, 'connect_hand')
+        self.assertIn('触觉没有连接', self.run_action(c, 'run_policy')['message'])
+        self.run_action(c, 'disconnect_hand')
+        self.run_action(c, 'disconnect_arm')
+
     def test_tactile_tare_and_status(self):
         c = self.controller()
         self.assertIn('触觉没有打开', self.run_action(c, 'tare_tactile')['message'])
@@ -204,6 +235,8 @@ class PanelLogicTests(unittest.TestCase):
         self.assertIn('tare_tactile', enabled_actions(dict(self.status(), tactile=[0., .1, .2, .3])))
         self.assertNotIn('tare_tactile', enabled_actions(dict(self.status(), tactile='PaXini reading too old')))
         self.assertNotIn('tare_tactile', enabled_actions(dict(self.status(busy='run_policy'), tactile=[0.]*4)))
+        self.assertIn('reconnect_tactile', enabled_actions(dict(self.status(), tactile='PaXini reading too old')))
+        self.assertNotIn('reconnect_tactile', enabled_actions(self.status()))          # no tactile at all
 
     def test_tactile_markdown(self):
         text = tactile_markdown(dict(self.status(), tactile=[.1, .5, 0., -.2], tactile_threshold=.3))

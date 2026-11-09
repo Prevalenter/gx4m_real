@@ -94,7 +94,7 @@ def table_plane(rgb, depth, K):
 
 class Problem:
     def __init__(self, handeye, contact_dirs, *, plate=False, finger_bias=False, free_scale=False,
-                 hand_mount=False, handeye_term=True, sample_plane=False):
+                 hand_mount=False, handeye_term=True, sample_plane=False, set_offsets=None):
         import trimesh
         import yourdfpy
 
@@ -182,6 +182,8 @@ class Problem:
         # start: the handeye result's extrinsic, board and compensation
         self.X0, self.Y0 = rigid(self.he['T_base_cam']), rigid(self.he['T_flange_board'])
         self.delta0 = np.radians(self.he['joint_compensation']['offsets_deg'])
+        for joint, deg in (set_offsets or {}).items():     # fixed or started at a given zero
+            self.delta0[joint - 1] = np.radians(deg)
         self.column_sel = None
 
     # parameters: xiX(6) xiY(6) delta(7, rad, on top of delta0) log_scale(1) [finger bias(4, m)]
@@ -316,11 +318,14 @@ def main():
     parser.add_argument('--sample-plane', action='store_true',
                         help="Each contact's fingertips on the table fitted to that sample's own depth")
     parser.add_argument('--free', default='1234567', help='Joints whose zero is solved, e.g. 23456')
+    parser.add_argument('--set-offset', nargs='*', default=[], metavar='J=DEG',
+                        help='Zero offsets (deg) to start from, e.g. 1=4.5; with --free leaving J out, kept fixed')
     parser.add_argument('--free-scale', action='store_true', help='Also solve a depth scale (default 1)')
     args = parser.parse_args()
     problem = Problem(args.handeye, args.contacts, plate=args.plate, finger_bias=args.finger_bias,
                       free_scale=args.free_scale, hand_mount=args.hand_mount, handeye_term=not args.no_handeye,
-                      sample_plane=args.sample_plane)
+                      sample_plane=args.sample_plane,
+                      set_offsets={int(a.split('=')[0]): float(a.split('=')[1]) for a in args.set_offset})
     print(f'{len(problem.he_samples)} hand-eye samples, {len(problem.contacts)} contacts, '
           f'{len(problem.column_frames)} column frames; table plane rms {problem.table_rms_mm:.2f} mm', flush=True)
     p = problem.solve([int(c) - 1 for c in args.free])
@@ -356,7 +361,8 @@ def write_result(args, problem, rep):
                   joint_compensation=dict(directions=directions, offsets_deg=rep['offsets_deg'],
                                           source=str(yaml_path.relative_to(ROOT) if yaml_path.is_relative_to(ROOT)
                                                      else yaml_path)),
-                  joint_solve=dict(contacts=[str(c) for c in args.contacts], plate=args.plate,
+                  joint_solve=dict(contacts=[str(c) for c in args.contacts], plate=args.plate, set_offset=args.set_offset,
+                                   no_handeye=args.no_handeye, sample_plane=args.sample_plane,
                                    finger_bias=args.finger_bias, free=args.free, depth_scale=rep['depth_scale'],
                                    finger_bias_mm=rep['finger_bias_mm'], hand_mount=args.hand_mount,
                                    hand_mount_mm=rep['hand_mount_mm'], stats=rep['stats'], start=str(args.handeye)),

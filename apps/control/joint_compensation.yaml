@@ -1,6 +1,7 @@
 version: 1
-# Zero offsets J3–J6 from pivot FK calibration (offsets model) on
+# Zero offsets J3, J5, J6 from pivot FK calibration (offsets model) on
 # fk_20261030_213630 + fk_20261030_222431; J1/J7 are unobservable, J2 (+0.001° ± 0.41°) kept at 0.
+# J4 is 0, not the pivot +3.0735°: hand-eye session he_20261101_165040 fits about -0.7° and 0 lowers its RMS from 2.68 to 1.62 px.
 joints:
   joint1:
     direction: -1
@@ -13,7 +14,7 @@ joints:
     offset_deg: -1.7702
   joint4:
     direction: 1
-    offset_deg: 3.0735
+    offset_deg: 0.0
   joint5:
     direction: -1
     offset_deg: -2.195

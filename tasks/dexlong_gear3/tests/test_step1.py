@@ -373,6 +373,10 @@ class BeamLiftRolloutTests(unittest.TestCase):
         self.assertFalse(start_check(self.reference, pos + [.015, 0, 0], quat)[0])
         self.assertTrue(start_check(self.reference, pos + [.045, -.03, .04], quat, .05, .05)[0])   # widened to 5 cm
         self.assertFalse(start_check(self.reference, pos, quat_mul(quat, [0., 0., 0., 1.]))[0])   # turned 180 deg
+        # No height limit for the lift start: the reference start is where the reset places the beam (on Newton
+        # 9.5 mm above where it comes to rest on the table).
+        self.assertTrue(start_check(self.reference, pos + [0, 0, -.0095], quat)[0])
+        self.assertTrue(start_check(self.reference, pos + [0, 0, .03], quat)[0])
 
 
 class TrainingUrdfTests(unittest.TestCase):

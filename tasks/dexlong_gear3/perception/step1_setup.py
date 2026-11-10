@@ -242,13 +242,15 @@ class Step1Setup(SceneViewer):
 
 
 def lift_start_report(position, rotation, reference, xy=LIFT_START_XY, z=START_Z):
-    """Beam-at-start errors (m, deg) of an env-frame pose against the trained start pose; ok within xy, z (m)."""
+    """Beam-at-start errors (m, deg) of an env-frame pose against the trained start pose; ok within xy (m) and the
+    angle, at any height (as step1.start_check: the reference start is where the reset places the beam, above the
+    table); z is kept for the callers and not checked."""
     start = pose(reference['object_pos'], reference['object_quat'])
     d = np.asarray(position) - start[:3, 3]
     relative = start[:3, :3].T @ rotation
     angle = float(np.degrees(np.arccos(np.clip((np.trace(relative) - 1)/2, -1., 1.))))
     yaw = float(np.degrees(np.arctan2(relative[1, 0], relative[0, 0])))
-    ok = max(abs(d[0]), abs(d[1])) <= xy and abs(d[2]) <= z and angle <= LIFT_START_ANGLE
+    ok = max(abs(d[0]), abs(d[1])) <= xy and angle <= LIFT_START_ANGLE
     return dict(dx=d[0], dy=d[1], dz=d[2], angle=angle, yaw=yaw, ok=bool(ok), xy=xy, z=z)
 
 
@@ -256,7 +258,7 @@ def lift_report_markdown(r):
     mm = lambda v: f'{v*1000:+.1f} mm'
     return (f"**起点（横梁平放在桌上）** {'✅' if r['ok'] else '❌'}\n\n"
             f"x {mm(r['dx'])}，y {mm(r['dy'])}（各 ≤ ±{r['xy']*1000:.0f} mm），高度 {mm(r['dz'])}"
-            f"（≤ {r['z']*1000:.0f} mm），朝向差 {r['angle']:.1f}°（≤ {LIFT_START_ANGLE:.0f}°，其中绕自身 z 偏航 "
+            f"（不限制），朝向差 {r['angle']:.1f}°（≤ {LIFT_START_ANGLE:.0f}°，其中绕自身 z 偏航 "
             f"{r['yaw']:+.1f}°）\n\n"
             + ('' if r['ok'] else f"横梁按 x {mm(-r['dx'])}、y {mm(-r['dy'])} 移动（世界坐标轴），"
                f"偏航转 {-r['yaw']:+.1f}°。\n\n"))

@@ -48,7 +48,7 @@ HERE = Path(__file__).resolve().parent
 REFERENCES = {1: HERE/'config'/'step1_reference.json', 2: HERE/'config'/'step2_reference.json',
               'beam1': HERE/'config'/'beam1_reference.json'}
 MODELS = {1: HERE/'models'/'step1_lstm_20261103_iter4750.pt', 2: HERE/'models'/'step2_lstm_20261105_iter4500.pt',
-          'beam1': HERE/'models'/'beam1_lstm_20261108_iter9750.pt'}
+          'beam1': HERE/'models'/'beam1_lstm_20261110_iter1250.pt'}
 # Gear pose estimator saved with each occlusion-aware policy (reference['pose_estimator']).
 ESTIMATORS = {2: HERE/'models'/'step2_estimator_20261105_iter4500.pt'}
 # Part each step's perception tracks (perception/gears.py).
@@ -73,7 +73,9 @@ def reference_urdf(reference):
 def start_check(reference, pos, quat, z_tolerance=.005, xy_tolerance=None):
     """(ok, message in Chinese) for an object pose against the trained start. The gears started anywhere within
     +-2 cm in x and y at any yaw (reset_position_noise, randomized yaw); lift references started at one fixed pose,
-    so the beam must lie within +-1 cm and 10 deg of it (a guess: the policy never saw another start).
+    so the beam must lie within +-1 cm and 10 deg of it (a guess: the policy never saw another start), at any height:
+    the reference start is where the reset places the beam (on Newton 7-10 mm above the table, it then drops), so a
+    real beam lying on the table sits below it (the user's call, 2026-11-10: no z limit for lift references).
     xy_tolerance (m) replaces those x, y limits."""
     fixed = reference.get('lift') is not None
     xy, angle_limit = (.01, 10.) if fixed else (.02, None)
@@ -81,8 +83,8 @@ def start_check(reference, pos, quat, z_tolerance=.005, xy_tolerance=None):
         xy = xy_tolerance
     offset = np.asarray(pos, dtype=np.float64) - reference['object_pos']
     text = (f"x {offset[0]*1000:+.0f}、y {offset[1]*1000:+.0f}、z {offset[2]*1000:+.0f} mm"
-            f"（x、y 各 ±{xy*1000:.0f} mm，z ±{z_tolerance*1000:.0f} mm")
-    ok = np.abs(offset[:2]).max() <= xy and abs(offset[2]) <= z_tolerance
+            f"（x、y 各 ±{xy*1000:.0f} mm，" + ("z 不限制" if fixed else f"z ±{z_tolerance*1000:.0f} mm"))
+    ok = np.abs(offset[:2]).max() <= xy and (fixed or abs(offset[2]) <= z_tolerance)
     if angle_limit is not None:
         R = quat_matrix(np.asarray(reference['object_quat'], dtype=np.float64)).T @ quat_matrix(np.asarray(quat, dtype=np.float64))
         angle = float(np.degrees(np.arccos(np.clip((np.trace(R) - 1)/2, -1., 1.))))

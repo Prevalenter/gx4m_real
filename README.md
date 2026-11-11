@@ -195,12 +195,12 @@ URDF 按参考配置的 `robot_urdf` 选（`step1.reference_urdf`，Viser 页面
 
 `--step beam1`：抓起横梁 part 2（蓝色），抬到起点正上方 20 cm。
 
-**当前模型（2026-11-11 更新）**：训练运行 `gx4m_dexlong_beam_step1_lift/2026-11-11_02-31-01`，第 2000 次迭代。
+**当前模型（2026-11-11 更新）**：训练运行 `gx4m_dexlong_beam_step1_lift/2026-11-11_18-22-35`，第 2000 次迭代。
 
 - 策略：`models/beam1_lstm_20261111_iter2000.pt`，30 Hz LSTM，83 维观测、23 维动作。
 - 配套估计器：`models/beam1_estimator_20261111_iter2000.pt`，估计横梁完整朝向的 x、z 两轴；已加入 `step1.ESTIMATORS`，与策略一起加载。
 - 初始关节、限位、平滑、触觉、目标和阶段参数以重新导出的 `config/beam1_reference.json` 为准；训练初始姿态快照与导出时配置已核对一致。
-- 权重通过百度网盘 API 分发，目录 `/gx4m_models/gx4m_real/beam1_20261111_iter2000/`；文件 ID、大小、SHA256 在 `config/beam1_models.json`。两份文件均已实际下载并校验 SHA256。
+- 权重通过百度网盘 API 分发，目录 `/gx4m_models/gx4m_real/beam1_20261111_iter2000_latest/`；文件 ID、大小、SHA256 在 `config/beam1_models.json`。两份文件均已实际下载并校验 SHA256。
 - Windows 上在仓库根目录运行（需 requests 和本机百度授权凭据）：
 
 ```powershell
@@ -463,9 +463,9 @@ python tasks/dexlong_gear3/tools/identify_arm.py --hardware --hand-port /dev/tty
 - [ ] **手臂驱动参数**：PVT 速度上限设成训练用的 1.5 rad/s。`max_joint_step_rad`（目标与实测之差上限，现在 0.08 rad）要和策略的步长对得上，策略每步最多 0.005 rad。确认腕部 DM-J4310 是 V1.1（峰值 7 N·m）还是 V1.2（12.5 N·m），仿真按 6 N·m 训练；实测 PVT 下的阶跃响应，和仿真 PD（kp 200、kd 40）对比。
 
 
-### Baidu API transfer verified: beam1 iteration 2000 (2026-11-11)
+### Latest step1 lift checkpoint uploaded (2026-11-11)
 
-The policy and paired two-axis estimator from training run `2026-11-11_02-31-01` were uploaded to `/gx4m_models/gx4m_real/beam1_20261111_iter2000/`. Both were downloaded through the API and passed SHA256 verification. `scripts/baidu_models.py` supports upload/download using the local DPAPI-encrypted token (Windows; requires requests); earlier notes about unimplemented transfer describe the initial setup state.
+The policy and paired two-axis estimator from training run `2026-11-11_18-22-35` at iteration 2000 were uploaded to `/gx4m_models/gx4m_real/beam1_20261111_iter2000_latest/`. Both were downloaded through the API and passed SHA256 verification. The deployment-compatible filenames are `beam1_lstm_20261111_iter2000.pt` and `beam1_estimator_20261111_iter2000.pt`. `scripts/baidu_models.py` supports upload/download using the local DPAPI-encrypted token (Windows; requires requests).
 
 For gx4m_real, download from the repository root:
 
@@ -473,4 +473,4 @@ For gx4m_real, download from the repository root:
 python scripts/baidu_models.py download --manifest tasks/dexlong_gear3/config/beam1_models.json --out tasks/dexlong_gear3/models
 ```
 
-The learning repository keeps the same manifest at `experiment/dexlong_beam_assembly/step1_lift/model_manifest.json`. Model files are not committed to Git.
+The matching manifest is `experiment/dexlong_beam_assembly/step1_lift/model_manifest.json`. Model files are not committed to Git.

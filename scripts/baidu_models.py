@@ -1,6 +1,7 @@
-"""Upload/download model artifacts using locally authorized Baidu Netdisk and Windows DPAPI.
+"""Upload/download model artifacts using locally authorized Baidu Netdisk.
 
 Requires requests. Credentials live outside the repository in ~/.config/gx4m-model-storage.
+Tokens use Windows DPAPI on Windows and owner-only JSON files on other platforms.
 Never prints tokens, credentials or authenticated URLs.
 """
 import argparse
@@ -8,7 +9,9 @@ import ctypes
 from ctypes import wintypes
 import hashlib
 import json
+import os
 from pathlib import Path
+import tempfile
 import requests
 
 CONFIG = Path.home()/'.config/gx4m-model-storage'
@@ -33,8 +36,12 @@ def protect(raw, decrypt=False):
 class Drive:
     def __init__(self):
         self.app = json.loads((CONFIG/'baidu-app.json').read_text(encoding='utf-8-sig'))
-        path = CONFIG/'baidu-token.dpapi'
-        self.token = json.loads(protect(path.read_bytes(), True))
+        windows = os.name == 'nt'
+        path = CONFIG/('baidu-token.dpapi' if windows else 'baidu-token.json')
+        raw = path.read_bytes()
+        self.token = json.loads(protect(raw, True) if windows else raw.decode('utf-8-sig'))
+        if not self.token.get('refresh_token'):
+            raise RuntimeError('Missing refresh_token; complete account authorization first')
         # Refresh on startup; refresh tokens can rotate, so persist the full response immediately.
         r = requests.post('https://openapi.baidu.com/oauth/2.0/token', data={
             'grant_type': 'refresh_token', 'refresh_token': self.token['refresh_token'],
@@ -42,9 +49,19 @@ class Drive:
         if 'access_token' not in r:
             raise RuntimeError('OAuth refresh failed: '+str(r.get('error', 'unknown')))
         self.token.update(r)
-        temporary = path.with_suffix('.tmp')
-        temporary.write_bytes(protect(json.dumps(self.token).encode()))
-        temporary.replace(path)
+        payload = json.dumps(self.token).encode()
+        with tempfile.NamedTemporaryFile(dir=CONFIG, prefix='.baidu-token-', delete=False) as output:
+            temporary = Path(output.name)
+            try:
+                output.write(protect(payload) if windows else payload)
+            except BaseException:
+                output.close()
+                temporary.unlink(missing_ok=True)
+                raise
+        try:
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def api(self, endpoint, method, data=None, **params):
         params.update(method=method, access_token=self.token['access_token'])

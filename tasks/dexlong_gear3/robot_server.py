@@ -242,6 +242,13 @@ class RobotController:
             q.update(zip(names[7:], np.asarray(hand.q, float).tolist()))
         with self.lock:
             busy, message = self.busy, self.message
+        estimated_pose = None
+        if busy == 'run_policy' and self.iface.estimator is not None:
+            estimate = self.iface.estimated_pose()
+            if estimate is not None:
+                position, quaternion = estimate
+                if np.isfinite(position).all() and np.isfinite(quaternion).all():
+                    estimated_pose = {'position': position.tolist(), 'wxyz': quaternion.tolist()}
         tactile = threshold = None
         if self.runner.tactile is None and self.tactile_factory is not None:
             tactile = '未连接：插好线后点“重新连接触觉”'
@@ -252,6 +259,7 @@ class RobotController:
             except RuntimeError as exc:
                 tactile = str(exc)
         return {'type': 'status', 'busy': busy, 'message': message, 'q': q, 'tactile': tactile,
+                'estimator_enabled': self.iface.estimator is not None, 'estimated_pose': estimated_pose,
                 'tactile_threshold': threshold,
                 'arm': {'connected': arm['connected'], 'mode': arm['mode'], 'error': arm['error'], 'mock': arm['mock']},
                 'hand': {'connected': hand is not None, 'error': self.hand_error},

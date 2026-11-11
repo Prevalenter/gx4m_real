@@ -6,7 +6,7 @@ step's gear (step1_setup.py --step 2, or publish_gear_pose.py --gear gear48).
 
 Per control step (1/30 s, as the policy was trained):
   1. read the arm (GX7, PVT) and hand (GX16) joints, take the newest gear pose from the perception process;
-  2. after the first step, run the stage logic (Step1Interface.update) on that state and stop on an outcome;
+  2. after the first step, run the stage logic (Step1Interface.update) and stop on an outcome except a lift drop;
   3. build the 78-wide observation, run the policy, map the action to joint targets;
   4. send the arm targets (model -> motor frame through the joint compensation) and the finger targets.
 
@@ -38,7 +38,8 @@ powered until the operator confirms; disconnecting disables the motors (the arm 
 
 --step beam1 grasps Beam part 2 and lifts it 20 cm (gx4m_learning dexlong_beam_lift step 1, the perception tracking
 beam2): the goal is set above the beam's measured pose when the episode starts, the policy sees the beam's full
-orientation, and holding the goal for success_steps ends the episode as a success ('drop' if it falls out of the hand).
+orientation, and holding the goal for success_steps ends the episode as a success. A 'drop' task outcome is logged
+once but does not stop the lift policy; operator stop and all other termination conditions remain active.
 """
 from __future__ import annotations
 
@@ -333,6 +334,7 @@ class Step1Runner:
             iface.reset()
         self.actor.reset()
         rows, result, outcome = [], None, None
+        drop_reported = False
         self.rate.next = None
         k = 0
         try:
@@ -353,8 +355,12 @@ class Step1Runner:
                 if iface.estimator is not None and not valid and iface.estimated_pose() is not None:
                     stage_pos, stage_quat = iface.estimated_pose()     # the camera has lost the gear: the estimate
                 if k > 0:
-                    result = iface.update(q, stage_pos, stage_quat)
+                    result = iface.update(q, stage_pos, stage_quat, terminate_on_drop=iface.lift is None)
                     rows[-1].update(stage_after=result['stage'], distance=result['distance'], away=result['away'])
+                    if iface.lift is not None and result.get('dropped'):
+                        if not drop_reported:
+                            self.log('Lift drop detected; continuing until operator stop or another termination condition.')
+                            drop_reported = True
                     if result['outcome']:
                         outcome = result['outcome']
                         break

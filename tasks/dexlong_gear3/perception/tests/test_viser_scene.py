@@ -123,6 +123,60 @@ class SceneTests(unittest.TestCase):
         finally:
             viewer.close()
 
+    def test_estimated_pose_is_world_frame_and_separate_from_tracking(self):
+        viewer = SceneViewer(self.calibration, initial=self.initial, gear='beam2', port=0, live=True)
+        try:
+            tracked = make_transform([.01, .02, .5], 10)
+            viewer.update({'status': 'TRACK', 'object_in_camera': tracked})
+            position = [.12, -.34, .56]
+            quaternion = [np.sqrt(.5), 0., 0., np.sqrt(.5)]
+            viewer.update_estimate({'position': position, 'wxyz': quaternion}, enabled=True)
+            self.assertTrue(viewer.estimated_part.visible)
+            np.testing.assert_allclose(viewer.estimated_part.position, position)
+            np.testing.assert_allclose(viewer.estimated_part.wxyz, quaternion)
+            np.testing.assert_allclose(viewer.part.position, world_object(self.calibration, tracked)[:3, 3])
+            self.assertIn('x +0.120', viewer.estimate_details.value)
+            self.assertIn('y -0.340', viewer.estimate_details.value)
+            viewer.update({'status': 'SEARCHING', 'object_in_camera': None})
+            self.assertFalse(viewer.part.visible)
+            self.assertTrue(viewer.estimated_part.visible)
+        finally:
+            viewer.close()
+
+    def test_estimate_visibility_invalid_data_and_expiry(self):
+        viewer = SceneViewer(self.calibration, initial=self.initial, port=0, stale_after=.5)
+        try:
+            pose = {'position': [.1, .2, .3], 'wxyz': [2., 0., 0., 0.]}
+            self.assertFalse(viewer.estimated_part.visible)
+            viewer.update_estimate(pose, enabled=True)
+            np.testing.assert_allclose(viewer.estimated_part.wxyz, [1., 0., 0., 0.])
+            viewer.show_estimate.value = False
+            viewer.update_estimate(pose, enabled=True)
+            self.assertFalse(viewer.estimated_part.visible)
+            viewer.show_estimate.value = True
+            viewer.update_estimate(pose, enabled=True)
+            self.assertTrue(viewer.estimated_part.visible)
+            viewer.expire(time.monotonic() + 2)
+            self.assertFalse(viewer.estimated_part.visible)
+            self.assertIn('过期', viewer.estimate_details.value)
+            for invalid in ({}, {'position': [0, 1], 'wxyz': [1, 0, 0, 0]},
+                            dict(pose, position=[np.nan, 0., 0.]), dict(pose, wxyz=[0., 0., 0., 0.])):
+                with self.subTest(pose=invalid):
+                    viewer.update_estimate(pose, enabled=True)
+                    viewer.update_estimate(invalid, enabled=True)
+                    self.assertFalse(viewer.estimated_part.visible)
+                    self.assertIn('无效', viewer.estimate_details.value)
+            viewer.update_estimate(pose, enabled=True)
+            viewer.update_estimate(None, enabled=True)
+            self.assertFalse(viewer.estimated_part.visible)
+            self.assertIn('等待策略', viewer.estimate_details.value)
+            viewer.update_estimate(pose, enabled=True)
+            viewer.update_estimate(None)
+            self.assertFalse(viewer.estimated_part.visible)
+            self.assertIn('未启用', viewer.estimate_details.value)
+        finally:
+            viewer.close()
+
     def test_import_does_not_load_inference_or_camera(self):
         subprocess.run([sys.executable, '-c',
             'import sys; import viser_scene; '

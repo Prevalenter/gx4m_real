@@ -241,6 +241,8 @@ class RobotPanel:
         if measured or self.live:
             self._move_robot(measured)
         self.tactile.show(status)
+        self.viewer.update_estimate(None if status is None else status.get('estimated_pose'),
+                                    enabled=status is not None and status.get('estimator_enabled', False))
 
     def _move_robot(self, measured):
         """The measured joints over the reference pose; back to the reference (which the sliders may have changed)

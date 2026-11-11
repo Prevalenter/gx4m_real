@@ -115,6 +115,7 @@ class SceneViewer:
         self.stale_after = stale_after
         self.lock = threading.RLock()
         self.last_update = None
+        self.estimate_last_update = None
         self.stop_event = threading.Event()
         self.T_world_cam = rigid(calibration['T_world_base']) @ rigid(calibration['T_base_cam'])
         self.model = yourdfpy.URDF.load(str(urdf), load_meshes=True)
@@ -148,12 +149,18 @@ class SceneViewer:
         self.robot = ViserUrdf(self.server, self.model, root_node_name='/robot')
         self.robot.update_cfg(self.q)
         camera = self.server.scene.add_frame('/camera', axes_length=.16, axes_radius=.0006, origin_radius=.0012)
+        self.camera_frame = camera
         set_pose(camera, self.T_world_cam)
         self.frustum = self.server.scene.add_camera_frustum('/camera/frustum',
             fov=np.deg2rad(55), aspect=4/3, scale=.05, thickness=2, thickness_units='screen', color=(255, 180, 40))
         self.part = self.server.scene.add_frame('/part', axes_length=.12, axes_radius=.0006,
                                                 origin_radius=.0012, visible=False)
         self.server.scene.add_mesh_trimesh('/part/gear', gear)
+        self.estimated_part = self.server.scene.add_frame('/estimated_part', axes_length=.10, axes_radius=.0006,
+                                                         origin_radius=.0012, visible=False)
+        self.server.scene.add_mesh_simple('/estimated_part/gear', vertices=np.asarray(gear.vertices, dtype=np.float32),
+                                          faces=np.asarray(gear.faces, dtype=np.uint32), color=(220, 70, 230), opacity=.45)
+        self.server.scene.add_label('/estimated_part/label', '估计器', position=(0., 0., .08))
         gui = self.server.gui
         self.intro = gui.add_markdown('## 固定相机与零件位姿\n' +
                          ('**合成演示/标定数据，非真机测量。**\n\n' if calibration.get('synthetic') else '') +
@@ -163,6 +170,17 @@ class SceneViewer:
         self.rate = gui.add_text('追踪帧率', initial_value='—', disabled=True)
         self.rate_shown = -np.inf     # monotonic time of the last rate text (refreshed every RATE_PERIOD)
         self.details = gui.add_markdown('')
+        with gui.add_folder('策略位姿估计器'):
+            gui.add_markdown('紫色半透明模型：策略使用的估计位姿；原色模型：相机追踪位姿。坐标为世界坐标，单位 m。')
+            self.show_estimate = gui.add_checkbox('显示估计位姿', initial_value=True)
+            self.estimate_details = gui.add_text('估计位置', initial_value='等待控制进程', disabled=True)
+
+            @self.show_estimate.on_update
+            def toggle_estimate(_):
+                with self.lock:
+                    fresh = (self.estimate_last_update is not None
+                             and time.monotonic() - self.estimate_last_update <= self.stale_after)
+                    self.estimated_part.visible = self.show_estimate.value and fresh
         self.image = gui.add_image(np.zeros((480, 640, 3), dtype=np.uint8), label='相机 RGB')
         with gui.add_folder('机器人参考姿态（度）'):
             for name in JOINTS:
@@ -237,9 +255,44 @@ class SceneViewer:
             if self.details.content != details:
                 self.details.content = details
 
+    def update_estimate(self, pose, *, enabled=False):
+        """Display the policy estimator's world-frame pose, independent of camera tracking."""
+        with self.lock:
+            position = quaternion = None
+            if enabled and pose is not None:
+                try:
+                    position = np.asarray(pose['position'], dtype=float)
+                    quaternion = np.asarray(pose['wxyz'], dtype=float)
+                    valid = (position.shape == (3,) and quaternion.shape == (4,)
+                             and np.isfinite(position).all() and np.isfinite(quaternion).all()
+                             and np.linalg.norm(quaternion) > 1e-8)
+                except (KeyError, TypeError, ValueError):
+                    valid = False
+                if not valid:
+                    pose = None
+                    message = '估计位姿无效'
+            else:
+                message = '等待策略运行' if enabled else '估计器未启用或控制进程未连接'
+            if enabled and pose is not None:
+                self.estimated_part.position = position
+                self.estimated_part.wxyz = quaternion / np.linalg.norm(quaternion)
+                self.estimate_last_update = time.monotonic()
+                self.estimated_part.visible = self.show_estimate.value
+                message = f'x {position[0]:+.3f} · y {position[1]:+.3f} · z {position[2]:+.3f}'
+            else:
+                self.estimated_part.visible = False
+                self.estimate_last_update = None
+            if self.estimate_details.value != message:
+                self.estimate_details.value = message
+
     def expire(self, now=None):
         with self.lock:
-            if self.live and self.last_update is not None and (now or time.monotonic()) - self.last_update > self.stale_after:
+            now = time.monotonic() if now is None else now
+            if self.estimate_last_update is not None and now - self.estimate_last_update > self.stale_after:
+                self.estimated_part.visible = False
+                self.estimate_last_update = None
+                self.estimate_details.value = '估计结果已过期'
+            if self.live and self.last_update is not None and now - self.last_update > self.stale_after:
                 self.part.visible = False
                 self.status.value = '检测结果已过期'
                 self.rate.value = '—'

@@ -261,9 +261,10 @@ class Step1Interface:
         """The last estimate in the env frame: gear origin (3,) and a wxyz quaternion with the estimated axis as +z
         (yaw arbitrary, which the yaw-free goal ignores), or with two estimated axes (x, z) the full orientation;
         None before the first observation."""
-        if self.estimate is None:
+        estimate = self.estimate
+        if estimate is None:
             return None
-        pos, axis = self.estimate[:2]
+        pos, axis = estimate[:2]
         if len(axis) == 6:
             x, z = axis[:3], axis[3:]/np.linalg.norm(axis[3:])
             x = x - (x @ z)*z
@@ -304,10 +305,11 @@ class Step1Interface:
         b = pos + self.reward_offsets @ quat_matrix(quat).T
         return float(np.linalg.norm(a - b, axis=-1).max())
 
-    def update(self, q, object_pos, object_quat):
+    def update(self, q, object_pos, object_quat, *, terminate_on_drop=True):
         """Stage logic after a control step, from the measured state (as Isaac's p2p step). Returns a dict with
         outcome None (continue), 'success', 'fall', 'hand_far', 'drop' (lift references) or 'timeout' (per-stage
-        step budget), and stage, distance (m), away (closest fingertip to the grasp point, m)."""
+        step budget), and stage, distance (m), away (closest fingertip to the grasp point, m). Setting
+        terminate_on_drop=False reports dropped without terminating, while keeping the other outcomes."""
         p = self.p2p
         was_retract = self.stage == 2
         distance = self.keypoint_distance(object_pos, object_quat)
@@ -337,6 +339,6 @@ class Step1Interface:
         fall = object_pos[2] < p['fall_height']
         hand_far = reach.max() > p['hand_far_distance'] and self.stage != 2
         timeout = self.stage_steps >= p['episode_steps']
-        outcome = ('success' if self.retracted else 'fall' if fall else 'drop' if dropped else 'hand_far' if hand_far
-                   else 'timeout' if timeout else None)
-        return dict(outcome=outcome, stage=self.stage, distance=distance, away=float(away))
+        outcome = ('success' if self.retracted else 'fall' if fall else 'drop' if dropped and terminate_on_drop
+                   else 'hand_far' if hand_far else 'timeout' if timeout else None)
+        return dict(outcome=outcome, stage=self.stage, distance=distance, away=float(away), dropped=dropped)

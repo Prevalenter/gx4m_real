@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -21,7 +22,7 @@ from gx4m_real.camera.frame_ipc import receive, send                    # noqa: 
 from gx4m_real.robot.arm import ArmDriver                               # noqa: E402
 from gx4m_real.robot.config import load_config                          # noqa: E402
 from gx4m_real.robot.hand import HandDriver                             # noqa: E402
-from robot_panel import enabled_actions, tactile_markdown                                # noqa: E402
+from robot_panel import RobotPanel, enabled_actions, tactile_markdown                     # noqa: E402
 from tasks.dexlong_gear3.robot_server import RobotController, serve     # noqa: E402
 from tasks.dexlong_gear3.run_step1 import (CONTROL_CONFIG, MODEL, CameraToEnv, FixedGearPose,  # noqa: E402
                                            Step1Runner, arm_config, load_actor)
@@ -53,6 +54,25 @@ class ControllerTests(unittest.TestCase):
             self.assertLess(time.monotonic(), deadline, f'{action} did not finish')
             time.sleep(.01)
         return controller.status()
+
+    def test_estimated_pose_status_is_world_frame_and_only_active_during_policy(self):
+        controller = self.controller()
+        self.assertFalse(controller.status()['estimator_enabled'])
+        self.assertIsNone(controller.status()['estimated_pose'])
+        position = np.array([.12, -.34, .56])
+        axes = np.array([0., 1., 0., 0., 0., 1.])
+        with mock.patch.object(controller.iface, 'estimator', object()), \
+                mock.patch.object(controller.iface, 'estimate', (position, axes, np.zeros(4))):
+            self.assertTrue(controller.status()['estimator_enabled'])
+            self.assertIsNone(controller.status()['estimated_pose'])
+            with mock.patch.object(controller, 'busy', 'run_policy'):
+                estimate = controller.status()['estimated_pose']
+                np.testing.assert_allclose(estimate['position'], position)
+                np.testing.assert_allclose(estimate['wxyz'], [np.sqrt(.5), 0., 0., np.sqrt(.5)])
+                with mock.patch.object(controller.iface, 'estimate', None):
+                    self.assertIsNone(controller.status()['estimated_pose'])
+                with mock.patch.object(controller.iface, 'estimate', (np.full(3, np.nan), axes, np.zeros(4))):
+                    self.assertIsNone(controller.status()['estimated_pose'])
 
     def test_buttons_in_order(self):
         c = self.controller()
@@ -244,6 +264,20 @@ class PanelLogicTests(unittest.TestCase):
         self.assertIn('| 拇指 | +0.10 N | 否 |', text)
         self.assertIn('读取失败', tactile_markdown(dict(self.status(), tactile='timeout')))
         self.assertIn('没有打开触觉', tactile_markdown(self.status()))
+
+    def test_panel_forwards_estimate_and_clears_it_on_disconnect(self):
+        panel = RobotPanel.__new__(RobotPanel)
+        panel.lock = threading.Lock()
+        panel.buttons = {}
+        panel.summary = mock.Mock(content='')
+        panel.tactile = mock.Mock()
+        panel.viewer = mock.Mock()
+        panel.live = False
+        estimate = {'position': [.1, .2, .3], 'wxyz': [1., 0., 0., 0.]}
+        panel.show(dict(self.status(), estimator_enabled=True, estimated_pose=estimate))
+        panel.viewer.update_estimate.assert_called_once_with(estimate, enabled=True)
+        panel.show(None)
+        panel.viewer.update_estimate.assert_called_with(None, enabled=False)
 
 
 if __name__ == '__main__':

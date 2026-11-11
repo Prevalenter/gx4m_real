@@ -6,6 +6,7 @@ import socket
 import sys
 import time
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -87,6 +88,74 @@ class Step1RunnerTests(unittest.TestCase):
         outcome, rows = runner.episode(max_steps=90)
         self.assertEqual(outcome, 'tracking_error')
         self.assertLess(len(rows), 90)
+
+    def lift_runner(self):
+        runner = self.runner()
+        runner.iface = Step1Interface(load_reference(REFERENCES['beam1']), estimator=ESTIMATORS['beam1'])
+        runner.gear = FixedGearPose(runner.iface.ref['object_pos'], runner.iface.ref['object_quat'])
+        runner.actor = mock.Mock(return_value=np.zeros(23))
+        runner.joints = mock.Mock(return_value=np.asarray(runner.iface.ref['initial_joint_pos']))
+        runner.send = mock.Mock()
+        runner.hold = mock.Mock()
+        runner.rate.sleep = mock.Mock(return_value=0.)
+        runner.log = mock.Mock()
+        return runner
+
+    def test_lift_drop_continues_until_operator_stop(self):
+        runner = self.lift_runner()
+        runner.iface.update = mock.Mock(return_value=dict(outcome=None, stage=0, distance=.1, away=.1, dropped=True))
+
+        def send(targets):
+            if runner.send.call_count == 3:
+                runner.stop_request.set()
+
+        runner.send.side_effect = send
+        outcome, rows = runner.episode(max_steps=5)
+        self.assertEqual((outcome, len(rows)), ('stopped', 3))
+        self.assertEqual(runner.actor.call_count, 3)
+        self.assertEqual(runner.iface.update.call_count, 2)
+        self.assertFalse(runner.iface.update.call_args.kwargs['terminate_on_drop'])
+        messages = [call.args[0] for call in runner.log.call_args_list]
+        self.assertEqual(sum('Lift drop detected' in message for message in messages), 1)
+        runner.hold.assert_called_once()
+
+    def test_lift_drop_keeps_other_termination_conditions(self):
+        for terminal in ('success', 'fall', 'hand_far', 'timeout'):
+            with self.subTest(outcome=terminal):
+                runner = self.lift_runner()
+                runner.iface.update = mock.Mock(side_effect=[
+                    dict(outcome=None, stage=0, distance=.1, away=.1, dropped=True),
+                    dict(outcome=terminal, stage=0, distance=.1, away=.1),
+                ])
+                outcome, rows = runner.episode(max_steps=5)
+                self.assertEqual((outcome, len(rows)), (terminal, 2))
+                runner.hold.assert_called_once()
+
+    def test_lift_drop_keeps_tracking_error_stop(self):
+        runner = self.lift_runner()
+        runner.iface.update = mock.Mock(return_value=dict(outcome=None, stage=0, distance=.1, away=.1, dropped=True))
+        initial = np.asarray(runner.iface.ref['initial_joint_pos'])
+        displaced = initial.copy()
+        displaced[0] += runner.max_tracking_error + .1
+        runner.joints.side_effect = [initial, initial, displaced]
+        outcome, rows = runner.episode(max_steps=5)
+        self.assertEqual((outcome, len(rows)), ('tracking_error', 1))
+        runner.hold.assert_called_once()
+
+    def test_lift_drop_does_not_mask_timeout(self):
+        runner = self.lift_runner()
+        iface = runner.iface
+        joints = np.asarray(iface.ref['initial_joint_pos'])
+        start = np.asarray(iface.ref['object_pos'])
+        quat = iface.ref['object_quat']
+        self.assertIsNone(iface.update(joints, start + [0, 0, .05], quat)['outcome'])
+        result = iface.update(joints, start + [0, 0, .01], quat, terminate_on_drop=False)
+        self.assertTrue(result['dropped'])
+        self.assertIsNone(result['outcome'])
+        iface.stage_steps = iface.p2p['episode_steps'] - 1
+        result = iface.update(joints, start + [0, 0, .01], quat, terminate_on_drop=False)
+        self.assertTrue(result['dropped'])
+        self.assertEqual(result['outcome'], 'timeout')
 
     def tactile_runner(self, normals):
         sensors = [FakeTotal(n) for n in normals]

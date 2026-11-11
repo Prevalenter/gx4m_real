@@ -1,26 +1,38 @@
 {
-    "files":  [
-                  {
-                      "name":  "beam1_lstm_20261111_iter2000.pt",
-                      "path":  "/gx4m_models/gx4m_real/beam1_20261111_iter2000_latest/beam1_lstm_20261111_iter2000.pt",
-                      "fs_id":  752692273798609,
-                      "size":  16564917,
-                      "sha256":  "2264cd0dd94180c6703966fe836149d00c3b3f49597a306e8c72a799c075fe1c"
-                  },
-                  {
-                      "name":  "beam1_estimator_20261111_iter2000.pt",
-                      "path":  "/gx4m_models/gx4m_real/beam1_20261111_iter2000_latest/beam1_estimator_20261111_iter2000.pt",
-                      "fs_id":  1063494812415748,
-                      "size":  6629517,
-                      "sha256":  "8cf0553f7cd34b2f5e2651779cb5f2f2c2f550ae2faa762898165cb777a18031"
-                  }
-              ],
-    "task":  "beam_step1_lift",
-    "training_run":  "2026-11-11_18-22-35",
-    "iteration":  2000,
-    "policy_observations":  83,
-    "actions":  23,
-    "estimator_axes":  2,
-    "export_git_commit":  "06fdf9b5c6b62e17645337ecc0269788df40768c",
-    "training_provenance":  "logs/rsl_rl/gx4m_dexlong_beam_step1_lift/2026-11-11_18-22-35/run.json, environment.yaml and initial_pose_snapshot.json"
+  "files": [
+    {
+      "name": "beam1_lstm_20261111_233133_iter1000.pt",
+      "path": "/gx4m_models/gx4m_real/beam1_20261111_233133_iter1000/beam1_lstm_20261111_233133_iter1000.pt",
+      "fs_id": 519497298390648,
+      "size": 16564917,
+      "sha256": "77ee5c8b7674fc59dc3dba99b55e5f024e381e3a05673bbfb1328aa3b725b42d"
+    },
+    {
+      "name": "beam1_estimator_20261111_233133_iter1000.pt",
+      "path": "/gx4m_models/gx4m_real/beam1_20261111_233133_iter1000/beam1_estimator_20261111_233133_iter1000.pt",
+      "fs_id": 1077042477033249,
+      "size": 6629517,
+      "sha256": "e4e290f7aa202ff9f2445244c69b41de287aad258323624b7145acd893940159"
+    }
+  ],
+  "task": "beam_step1_lift",
+  "training_run": "2026-11-11_23-31-33",
+  "iteration": 1000,
+  "policy_observations": 83,
+  "actions": 23,
+  "estimator_axes": 2,
+  "training_randomization": {
+    "object_size_scale_range": [
+      0.8,
+      1.2
+    ],
+    "independent_axes": true,
+    "occlusion_share": 1.0,
+    "position_noise_std_m": 0.003,
+    "position_bias_std_m": 0.003,
+    "goal_bias_std_m": 0.001,
+    "rotation_noise_deg": 2.0,
+    "rotation_bias_deg": 1.0
+  },
+  "training_provenance": "run.json, environment.yaml and initial_pose_snapshot.json in logs/rsl_rl/gx4m_dexlong_beam_step1_lift/2026-11-11_23-31-33"
 }

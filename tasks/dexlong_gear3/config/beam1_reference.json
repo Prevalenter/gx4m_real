@@ -1,6 +1,6 @@
 {
  "task": "beam_lift_step1",
- "checkpoint": "E:\\work\\gx4max\\gx4m_learning\\logs\\rsl_rl\\gx4m_dexlong_beam_step1_lift\\2026-11-11_02-31-01\\model_2000.pt",
+ "checkpoint": "E:\\work\\gx4max\\gx4m_learning\\logs\\rsl_rl\\gx4m_dexlong_beam_step1_lift\\2026-11-11_23-31-33\\model_1000.pt",
  "joint_order": [
   "joint1",
   "joint2",
@@ -319,7 +319,7 @@
   -0.21118484437465668,
   -0.4921828508377075,
   -0.1431169956922531,
-  0.5253441333770752,
+  0.0,
   1.9896754026412964,
   0.59690260887146,
   0.1745329201221466,

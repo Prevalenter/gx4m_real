@@ -48,10 +48,10 @@ HERE = Path(__file__).resolve().parent
 REFERENCES = {1: HERE/'config'/'step1_reference.json', 2: HERE/'config'/'step2_reference.json',
               'beam1': HERE/'config'/'beam1_reference.json'}
 MODELS = {1: HERE/'models'/'step1_lstm_20261103_iter4750.pt', 2: HERE/'models'/'step2_lstm_20261105_iter4500.pt',
-          'beam1': HERE/'models'/'beam1_lstm_20261111_iter2000.pt'}
+          'beam1': HERE/'models'/'beam1_lstm_20261111_233133_iter1000.pt'}
 # Gear pose estimator saved with each occlusion-aware policy (reference['pose_estimator']).
 ESTIMATORS = {2: HERE/'models'/'step2_estimator_20261105_iter4500.pt',
-              'beam1': HERE/'models'/'beam1_estimator_20261111_iter2000.pt'}
+              'beam1': HERE/'models'/'beam1_estimator_20261111_233133_iter1000.pt'}
 # Part each step's perception tracks (perception/gears.py).
 PARTS = {1: 'gear24', 2: 'gear48', 'beam1': 'beam2'}
 

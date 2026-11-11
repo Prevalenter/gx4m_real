@@ -27,7 +27,7 @@ estimated_pose() gives the estimate in the env frame for the stage logic while t
 Beam lift (key 'beam1', gx4m_learning dexlong_beam_lift step 1: grasp Beam part 2 and lift it 20 cm): the beam has no
 symmetry axis, so the policy carries its full orientation as two body axes (reference['object_axes'], x then z; the
 object_frame field) and the goal keeps the exact start orientation (goal_yaw_symmetry 0, not yaw-free). Since
-2026-11-08 (model_9750) the beam policy has no pose estimator: it acts on the tracked pose (81-dim observation).
+2026-11-11 (iteration 2000) the beam policy uses its paired two-axis pose estimator (83-dim observation).
 A reference with a lift block (export ... --task beam_lift) has a single goal, the start pose raised by
 lift['height']: reset(object_pose=...) puts it above the measured start, its first hit (success_steps near it) is
 the success, and a drop (lifted drop_min_rise, then drop_fall lower relative to the palm than at its highest) ends
@@ -48,9 +48,10 @@ HERE = Path(__file__).resolve().parent
 REFERENCES = {1: HERE/'config'/'step1_reference.json', 2: HERE/'config'/'step2_reference.json',
               'beam1': HERE/'config'/'beam1_reference.json'}
 MODELS = {1: HERE/'models'/'step1_lstm_20261103_iter4750.pt', 2: HERE/'models'/'step2_lstm_20261105_iter4500.pt',
-          'beam1': HERE/'models'/'beam1_lstm_20261110_iter1250.pt'}
+          'beam1': HERE/'models'/'beam1_lstm_20261111_iter2000.pt'}
 # Gear pose estimator saved with each occlusion-aware policy (reference['pose_estimator']).
-ESTIMATORS = {2: HERE/'models'/'step2_estimator_20261105_iter4500.pt'}
+ESTIMATORS = {2: HERE/'models'/'step2_estimator_20261105_iter4500.pt',
+              'beam1': HERE/'models'/'beam1_estimator_20261111_iter2000.pt'}
 # Part each step's perception tracks (perception/gears.py).
 PARTS = {1: 'gear24', 2: 'gear48', 'beam1': 'beam2'}
 

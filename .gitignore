@@ -14,3 +14,6 @@ Log/
 
 # MuJoCo warning log
 MUJOCO_LOG.TXT
+
+# Model weights are distributed through Baidu Netdisk API.
+tasks/dexlong_gear3/models/*.pt

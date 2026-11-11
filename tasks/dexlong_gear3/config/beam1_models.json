@@ -1,0 +1,26 @@
+{
+  "files": [
+    {
+      "name": "beam1_lstm_20261111_iter2000.pt",
+      "path": "/gx4m_models/gx4m_real/beam1_20261111_iter2000/beam1_lstm_20261111_iter2000.pt",
+      "fs_id": 212392851062674,
+      "size": 16564917,
+      "sha256": "cbf2eecd7c5c1340f2f06028ab9e1f0c871d62d0d4d6e7ec91268d71027d3632"
+    },
+    {
+      "name": "beam1_estimator_20261111_iter2000.pt",
+      "path": "/gx4m_models/gx4m_real/beam1_20261111_iter2000/beam1_estimator_20261111_iter2000.pt",
+      "fs_id": 281583102238692,
+      "size": 6629517,
+      "sha256": "e240d4aa120a246bf91d2f52e31d036c3fb2e8dc0e5885179c3f2c7b7aef4db7"
+    }
+  ],
+  "task": "beam_step1_lift",
+  "training_run": "2026-11-11_02-31-01",
+  "iteration": 2000,
+  "policy_observations": 83,
+  "actions": 23,
+  "estimator_axes": 2,
+  "export_git_commit": "06fdf9b5c6b62e17645337ecc0269788df40768c",
+  "training_provenance": "run.json, environment.yaml and initial_pose_snapshot.json in the training run; export commit may include local changes"
+}

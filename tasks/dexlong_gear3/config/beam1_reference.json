@@ -1,6 +1,6 @@
 {
  "task": "beam_lift_step1",
- "checkpoint": "E:\\work\\gx4max\\gx4m_learning\\logs\\rsl_rl\\gx4m_dexlong_beam_step1_lift\\2026-11-10_22-30-03\\model_1250.pt",
+ "checkpoint": "E:\\work\\gx4max\\gx4m_learning\\logs\\rsl_rl\\gx4m_dexlong_beam_step1_lift\\2026-11-11_02-31-01\\model_2000.pt",
  "joint_order": [
   "joint1",
   "joint2",
@@ -320,20 +320,20 @@
   -0.4921828508377075,
   -0.1431169956922531,
   0.5253441333770752,
-  1.7470746040344238,
+  1.9896754026412964,
   0.59690260887146,
   0.1745329201221466,
-  0.004818070214241743,
-  0.5375614166259766,
-  0.1745329201221466,
-  0.1745329201221466,
+  0.032743338495492935,
+  0.2076941877603531,
+  0.02967059798538685,
   0.0,
-  0.8726646304130554,
+  0.0,
+  0.48869219422340393,
   0.1745329201221466,
   0.1745329201221466,
   0.0,
   -0.0021632465068250895,
-  0.6248278617858887,
+  0.5270894169807434,
   0.1745329201221466
  ],
  "base_pos": [
@@ -562,7 +562,8 @@
   "object_pos_rel_palm": 3,
   "object_pos_rel_goal": 3,
   "object_frame": 6,
-  "fingertip_object_contact": 4
+  "fingertip_object_contact": 4,
+  "object_pose_std": 2
  },
  "align_reward": {
   "scale": 2.0,
@@ -657,5 +658,27 @@
   "height": 0.2,
   "drop_min_rise": 0.03,
   "drop_fall": 0.03
+ },
+ "pose_estimator": {
+  "inputs": {
+   "joint_pos": 23,
+   "prev_action_targets": 23,
+   "palm_rot": 4,
+   "fingertips_in_palm": 12,
+   "tracked_pos_in_palm": 3,
+   "tracked_axis_in_palm": 6,
+   "tracked_valid": 1,
+   "tracked_age": 1,
+   "pad_force": 12
+  },
+  "axes": 2,
+  "hidden": 256,
+  "file": "estimator.pt",
+  "position_scale": 10.0,
+  "tactile_force_scale": 5.0,
+  "max_age_s": 3.0,
+  "min_visible": 0.65,
+  "reacquire_steps": 3,
+  "pad_force_axes": "per finger (normal into the pad, distal shear, lateral shear) in the fingertip link frame"
  }
 }

@@ -290,14 +290,17 @@ class BeamLiftRolloutTests(unittest.TestCase):
                 if outcomes is not None and not r['done'][k-1]:
                     outcomes.append((k-1, info['outcome']))
             contact = r['obs'][k][self.cols['fingertip_object_contact']]   # needs PhysX contacts: taken as recorded
-            yield k, iface.observation(q, pos, quat_matrix(quat), contact)
+            pe = self.reference['pose_estimator']
+            yield k, iface.observation(q, r['tracked_pos'][k], quat_matrix(r['tracked_quat'][k]), contact,
+                                       valid=bool(r['valid'][k]), age=float(r['age'][k])*pe['max_age_s'],
+                                       pad_force=r['pad_force'][k].reshape(4, 3)*pe['tactile_force_scale'])
 
     def test_deployed_reference_matches_export(self):
         self.assertEqual(load_reference(REFERENCES[self.STEP]), self.reference)
         self.assertEqual(self.reference['task'], 'beam_lift_step1')
-        self.assertEqual(sum(self.reference['policy_fields'].values()), 81)
-        self.assertNotIn('pose_estimator', self.reference)
-        self.assertNotIn(self.STEP, ESTIMATORS)
+        self.assertEqual(sum(self.reference['policy_fields'].values()), 83)
+        self.assertEqual(self.reference['pose_estimator']['axes'], 2)
+        self.assertIn(self.STEP, ESTIMATORS)
         self.assertEqual(self.reference['object_axes'], [[1., 0., 0.], [0., 0., 1.]])
         self.assertEqual(self.reference['lift']['height'], .2)
 
@@ -326,7 +329,7 @@ class BeamLiftRolloutTests(unittest.TestCase):
 
     def test_policy_matches_isaac(self):
         actor = RslRlActor(MODELS[self.STEP])
-        self.assertEqual((actor.kind, actor.obs_dim, actor.action_dim), ('lstm', 81, 23))
+        self.assertEqual((actor.kind, actor.obs_dim, actor.action_dim), ('lstm', 83, 23))
         err = 0.
         for o, a, done in zip(self.rollout['obs'], self.rollout['action'], self.rollout['done']):
             err = max(err, float(np.abs(actor(o) - a).max()))

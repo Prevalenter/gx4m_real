@@ -1,5 +1,26 @@
 # gx4m_real
 
+## 模型权重存储与传输（2026-11-11）
+
+今后 gx4m_learning 与 gx4m_real 的训练 checkpoint、部署策略及位姿估计器权重统一通过 **百度网盘 API 上传和下载**。GitHub 保存代码、配置、模型清单和下载说明；新增和更新的权重不再作为普通 Git 文件提交。
+
+- 上传时保留任务名、日期和迭代次数，不覆盖已有版本。
+- 恢复训练或实机部署前下载对应版本。gx4m_real 的本地部署权重目录为 `tasks/dexlong_gear3/models/`。
+- 模型清单应记录网盘路径或文件 ID、文件名、大小、SHA256、训练代码提交及观测/网络配置，并注明策略与估计器的配套关系。下载后校验 SHA256。
+- 应用密钥和令牌只保存在本机，不写入 Git、README 或日志。
+
+本机配置目录：`%USERPROFILE%\.config\gx4m-model-storage\`，即 `C:\Users\43462\.config\gx4m-model-storage\`。
+
+| 文件 | 用途 |
+|---|---|
+| `baidu-app.json` | 应用的 app_id、app_key、secret_key、app_name |
+| `baidu-token.dpapi` | Windows DPAPI 加密的 OAuth 令牌，供原 Windows 用户和机器使用 |
+| `baidu-device-auth.json` | 首次设备授权的临时信息，不是长期传输凭据 |
+
+已验证应用凭据、账号 OAuth 授权及网盘用户接口，获得 basic netdisk 权限。截至 2026-11-11，上传/下载脚本和文件传输验证尚未完成，网盘目标目录与模型清单尚未建立；授权成功不代表模型已上传。其他机器需单独配置和授权。
+
+此前已提交到 Git 的权重暂未迁移或清理。后续先完成网盘上传和下载校验，再停止 Git 跟踪并添加忽略规则；Git 历史清理单独安排。
+
 GX7 机械臂 + GX4M 灵巧手的真机代码：控制、相机、标定、感知和策略部署。训练代码在 `gx4m_learning` 仓库，本仓库不依赖它。
 
 ## 目录
@@ -174,18 +195,25 @@ URDF 按参考配置的 `robot_urdf` 选（`step1.reference_urdf`，Viser 页面
 
 `--step beam1`：抓起横梁 part 2（蓝色），抬到起点正上方 20 cm。
 
-**当前模型（2026-11-10 更新）**：gx4m_learning 的 `gx4m_dexlong_beam_step1_lift/2026-11-10_22-30-03` 第 1250 次迭代，`models/beam1_lstm_20261110_iter1250.pt`。这是 Isaac Lab 3 + Newton（MuJoCo-Warp）上训练的第一个横梁模型。
-- **没有位姿估计器**：策略直接用跟踪到的横梁位姿（训练里保留了感知延迟），输入 81 维，`step1.ESTIMATORS` 里没有 beam1。
-- **触觉每个控制步都读**：指腹 0/1 接触，阈值 0.3 N。
-- **起点**：横梁起点 (0.100, −0.150) m，偏航 −150°，和上一版相同。仿真 reset 时把横梁放在 z = 0.236 m，随后落到桌面（约 0.2265 m）；参考配置里的 `object_pos` 是放置高度，抬起目标和升高都按它算，和训练一致。
-- **初始关节换了**：joint4 −1.665 → −1.793 rad，手指 gx4m_joint5/6/13/14/15 也改了（以参考配置的 `initial_joint_pos` 为准）。
-- **横梁质量**：仿真按实测打印件 120 g，随机化 ×0.8～1.2（上一版 68.6 g、×0.5～1.5）。
-- 训练：30 Hz LSTM，sim2real 延迟和域随机化，橡胶指腹；接触、对夹奖励用拇指和中指；抬升奖励 320。训练统计：最近的 episode 成功率约 0.67（第 1250 次迭代），训练结束时（第 1352 次迭代）约 0.74。
+**当前模型（2026-11-11 更新）**：训练运行 `gx4m_dexlong_beam_step1_lift/2026-11-11_02-31-01`，第 2000 次迭代。
+
+- 策略：`models/beam1_lstm_20261111_iter2000.pt`，30 Hz LSTM，83 维观测、23 维动作。
+- 配套估计器：`models/beam1_estimator_20261111_iter2000.pt`，估计横梁完整朝向的 x、z 两轴；已加入 `step1.ESTIMATORS`，与策略一起加载。
+- 初始关节、限位、平滑、触觉、目标和阶段参数以重新导出的 `config/beam1_reference.json` 为准；训练初始姿态快照与导出时配置已核对一致。
+- 权重通过百度网盘 API 分发，目录 `/gx4m_models/gx4m_real/beam1_20261111_iter2000/`；文件 ID、大小、SHA256 在 `config/beam1_models.json`。两份文件均已实际下载并校验 SHA256。
+- Windows 上在仓库根目录运行（需 requests 和本机百度授权凭据）：
+
+```powershell
+python scripts/baidu_models.py download --manifest tasks/dexlong_gear3/config/beam1_models.json --out tasks/dexlong_gear3/models
+```
+
+- 25 项策略/观测/控制回放测试及 9 项运行入口测试通过。300 步标称仿真回放没有成功，最终超时；这些检查验证接口一致性，不代表实机成功率。尚未进行实机运行。
+- 新权重已加入 Git 忽略规则；旧权重的 Git 历史未清理。
 
 此前的版本（2026-11-08 第 9750 次迭代，PhysX 上训练，68.6 g；2026-11-07 第 8000 次迭代，带估计器、83 维输入）已删除，git 历史里还能找到。
 
 **和齿轮的区别**
-- **完整朝向**：横梁没有对称轴，策略用横梁的 x、z 两个轴（`object_frame`，6 维），策略输入共 81 维。
+- **完整朝向**：横梁没有对称轴，策略用横梁的 x、z 两个轴（`object_frame`，6 维），策略输入共 83 维（包含估计器的不确定度）。
   - 参考配置里的 `object_axes` 记录这两个轴。
   - 主循环把整个旋转矩阵传给 `observation()`。
 - **只有抬起，没有插入**：参考配置里的 `lift` 段记录抬起高度和掉落判定参数。
@@ -434,3 +462,15 @@ python tasks/dexlong_gear3/tools/identify_arm.py --hardware --hand-port /dev/tty
 - [ ] **安全**：首次上机用 `apply_action(..., arm_speed_scale=...)` 降速；监控目标与实测关节的差，超阈值停机；工作空间限制和急停；每个阶段 600 步（20 s）超时。策略动作大多饱和在 ±1，手指会满幅切换、手腕会抖，这是策略本身的行为。
 - [ ] **手臂驱动参数**：PVT 速度上限设成训练用的 1.5 rad/s。`max_joint_step_rad`（目标与实测之差上限，现在 0.08 rad）要和策略的步长对得上，策略每步最多 0.005 rad。确认腕部 DM-J4310 是 V1.1（峰值 7 N·m）还是 V1.2（12.5 N·m），仿真按 6 N·m 训练；实测 PVT 下的阶跃响应，和仿真 PD（kp 200、kd 40）对比。
 
+
+### Baidu API transfer verified: beam1 iteration 2000 (2026-11-11)
+
+The policy and paired two-axis estimator from training run `2026-11-11_02-31-01` were uploaded to `/gx4m_models/gx4m_real/beam1_20261111_iter2000/`. Both were downloaded through the API and passed SHA256 verification. `scripts/baidu_models.py` supports upload/download using the local DPAPI-encrypted token (Windows; requires requests); earlier notes about unimplemented transfer describe the initial setup state.
+
+For gx4m_real, download from the repository root:
+
+```powershell
+python scripts/baidu_models.py download --manifest tasks/dexlong_gear3/config/beam1_models.json --out tasks/dexlong_gear3/models
+```
+
+The learning repository keeps the same manifest at `experiment/dexlong_beam_assembly/step1_lift/model_manifest.json`. Model files are not committed to Git.

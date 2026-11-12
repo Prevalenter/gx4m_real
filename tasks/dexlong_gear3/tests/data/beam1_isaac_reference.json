@@ -1,6 +1,6 @@
 {
  "task": "beam_lift_step1",
- "checkpoint": "E:\\work\\gx4max\\gx4m_learning\\logs\\rsl_rl\\gx4m_dexlong_beam_step1_lift\\2026-11-11_23-31-33\\model_1000.pt",
+ "checkpoint": "E:\\work\\gx4max\\gx4m_learning\\logs\\rsl_rl\\gx4m_dexlong_beam_step1_lift\\2026-11-12_18-39-14\\model_10000.pt",
  "joint_order": [
   "joint1",
   "joint2",
@@ -210,22 +210,22 @@
   6.0,
   6.0,
   6.0,
-  0.5,
-  0.5,
-  0.5,
-  0.5,
-  0.5,
-  0.5,
-  0.5,
-  0.5,
-  0.5,
-  0.5,
-  0.5,
-  0.5,
-  0.5,
-  0.5,
-  0.5,
-  0.5
+  0.3199999928474426,
+  0.3199999928474426,
+  0.3199999928474426,
+  0.3199999928474426,
+  0.3199999928474426,
+  0.3199999928474426,
+  0.3199999928474426,
+  0.3199999928474426,
+  0.3199999928474426,
+  0.3199999928474426,
+  0.3199999928474426,
+  0.3199999928474426,
+  0.3199999928474426,
+  0.3199999928474426,
+  0.3199999928474426,
+  0.3199999928474426
  ],
  "velocity_limit": [
   1.5,
@@ -358,7 +358,7 @@
   2.1447861547258028e-16,
   -0.9659258127212524
  ],
- "object_mass": 0.11999999731779099,
+ "object_mass": 0.10000000149011612,
  "fixture_pos": [
   -0.1173797994852066,
   -0.10866788774728775,
@@ -530,7 +530,7 @@
   "lifting_bonus_threshold": 0.15,
   "force_lift_reward_active": false,
   "lift_progress_height": 0.2,
-  "lift_progress_reward": 320.0,
+  "lift_progress_reward": 800.0,
   "reach_goal_bonus": 250.0,
   "arm_velocity_penalty": 0.03,
   "hand_velocity_penalty": 0.003,
@@ -570,7 +570,7 @@
   "length": 0.005
  },
  "contact_reward_in_retract": false,
- "fingertip_contact_threshold": 0.2,
+ "fingertip_contact_threshold": 0.3,
  "control": {
   "kind": "arm_increment_hand_absolute",
   "actions": 23,
@@ -673,12 +673,15 @@
   },
   "axes": 2,
   "hidden": 256,
-  "file": "estimator.pt",
+  "file": "beam1_estimator_20261112_183914_iter10000.pt",
   "position_scale": 10.0,
   "tactile_force_scale": 5.0,
   "max_age_s": 3.0,
-  "min_visible": 0.65,
+  "min_visible": 0.85,
   "reacquire_steps": 3,
   "pad_force_axes": "per finger (normal into the pad, distal shear, lateral shear) in the fingertip link frame"
- }
+ },
+ "tactile_rate_hz": 5.0,
+ "tactile_average_frames": true,
+ "pose_estimator_rate_hz": 5.0
 }

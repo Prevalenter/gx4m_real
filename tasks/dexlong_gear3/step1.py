@@ -48,10 +48,10 @@ HERE = Path(__file__).resolve().parent
 REFERENCES = {1: HERE/'config'/'step1_reference.json', 2: HERE/'config'/'step2_reference.json',
               'beam1': HERE/'config'/'beam1_reference.json'}
 MODELS = {1: HERE/'models'/'step1_lstm_20261103_iter4750.pt', 2: HERE/'models'/'step2_lstm_20261105_iter4500.pt',
-          'beam1': HERE/'models'/'beam1_lstm_20261111_233133_iter1000.pt'}
+          'beam1': HERE/'models'/'beam1_lstm_20261112_183914_iter10000.pt'}
 # Gear pose estimator saved with each occlusion-aware policy (reference['pose_estimator']).
 ESTIMATORS = {2: HERE/'models'/'step2_estimator_20261105_iter4500.pt',
-              'beam1': HERE/'models'/'beam1_estimator_20261111_233133_iter1000.pt'}
+              'beam1': HERE/'models'/'beam1_estimator_20261112_183914_iter10000.pt'}
 # Part each step's perception tracks (perception/gears.py).
 PARTS = {1: 'gear24', 2: 'gear48', 'beam1': 'beam2'}
 
@@ -175,6 +175,11 @@ class Step1Interface:
         start height plus lift['height'] (default: the reference start)."""
         self.targets = np.array(self.ref['initial_joint_pos'] if targets is None else targets, dtype=np.float64)
         self.stage, self.near_steps, self.stage_steps, self.retracted = 0, 0, 0, False
+        self._sensor_step = 0
+        self._force_window = []
+        self._held_pad_force = None
+        self._held_contact = None
+        self._estimator_output = None
         if self.lift is not None:
             r = self.ref
             pos, quat = (r['object_pos'], r['object_quat']) if object_pose is None else object_pose
@@ -209,6 +214,22 @@ class Step1Interface:
         whether it is from this step, age the seconds since it was current, pad_force the tared pad forces (4, 3) N
         (normal, distal, lateral)."""
         q = np.asarray(q, dtype=np.float64)
+        rate = self.ref.get('tactile_rate_hz')
+        if rate:
+            period = max(1, round(1/(rate*self.dt)))
+            force = np.zeros((4, 3)) if pad_force is None else np.asarray(pad_force, dtype=np.float64)
+            self._force_window.append(force.copy())
+            if self._held_pad_force is None:
+                self._held_pad_force = force.copy()
+            if self.ref.get('tactile_average_frames'):
+                if len(self._force_window) >= period:
+                    self._held_pad_force = np.mean(self._force_window, axis=0)
+                    self._force_window.clear()
+            elif self._sensor_step % period == 0:
+                self._held_pad_force = force.copy()
+                self._force_window.clear()
+            self._held_contact = (self._held_pad_force[:, 0] > self.ref['binary_tactile_threshold_n']).astype(float)
+            pad_force, contact = self._held_pad_force, self._held_contact
         palm, palm_quat, tips = self.palm_and_tips(q)
         object_pos = np.asarray(object_pos, dtype=np.float64)
         axes = self.world_axes(object_axis)
@@ -226,6 +247,7 @@ class Step1Interface:
         )
         if self.estimator is not None:
             values.update(self._estimate(values, palm, palm_quat, tips, object_pos, axes, valid, age, pad_force))
+        self._sensor_step += 1
         missing = [n for n, _ in self.fields if n not in values]
         if missing:
             raise ValueError(f'Reference asks for observation fields this interface does not build: {missing}')
@@ -250,7 +272,11 @@ class Step1Interface:
         x = np.concatenate((values['joint_pos'], self.targets, values['palm_rot'], ((tips - palm) @ R).ravel()*scale,
                             R.T @ (object_pos - palm)*scale, (axes @ R).ravel(), [float(valid)],
                             [min(age/pe['max_age_s'], 1.)], force.ravel()/pe['tactile_force_scale']))
-        pos, est_axis, log_std = self.estimator.step(x)
+        rate = self.ref.get('pose_estimator_rate_hz')
+        period = max(1, round(1/(rate*self.dt))) if rate else 1
+        if self._estimator_output is None or self._sensor_step % period == 0:
+            self._estimator_output = self.estimator.step(x)
+        pos, est_axis, log_std = self._estimator_output
         rel = R @ pos/scale
         world_axis = (est_axis.reshape(-1, 3) @ R.T).ravel()
         self.estimate = (palm + rel, world_axis, log_std)

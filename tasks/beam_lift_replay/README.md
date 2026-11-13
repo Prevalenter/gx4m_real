@@ -26,11 +26,11 @@ bash tasks/beam_lift_replay/run.sh --real --hand-port /dev/ttyUSB0
 
 ## 轨迹和时间
 
-- `trajectory/joint_targets.json`：原始 120 Hz、616 帧、5.125 秒的 23 关节目标，单位 rad。
-- 来源：`2026-11-12_18-39-14/model_10000.pt`，成功抬升约 20.9 cm，随机质量 157.7 g。
-- 按源时间线插值成 30 Hz，共 155 帧；末帧在 5.1333 秒下发，保留原始终点。
-- 使用高层目标，不额外重放仿真机械臂驱动滞后。
-- 原轨迹手部关节限位 DR 导致最多 0.008245 rad 越界，重放时截到真机限位，界面显示截断量。超过 0.011 rad 则拒绝加载。原文件保留不变。
+- Source: `2026-11-13_07-55-36/model_3000.pt`, 608 frames at 120 Hz, 5.058333 seconds.
+- Successful lift: 20.92 cm; randomized mass: 61.62 g.
+- Replay: 30 Hz, 153 frames, endpoint at 5.066667 seconds.
+- High-level targets exclude simulated arm drive lag.
+- JSON/CSV hand targets clipped to hardware limits (max 0.019693 rad); raw targets retained in JSON and NPZ.
 - 机械臂先转换到电机角度并检查限位；保留现有驱动的速度和步长限制。
 - 硬件调用串行执行于同一 30 Hz 循环；若通信耗时超出周期则降速并显示提示，不跳帧或突发补发。机械臂和手命令使用同一帧，但 CAN 与串口不保证物理同时到达。
 

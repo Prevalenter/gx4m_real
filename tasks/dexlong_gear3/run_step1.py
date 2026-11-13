@@ -44,7 +44,6 @@ once but does not stop the lift policy; operator stop and all other termination 
 from __future__ import annotations
 
 import argparse
-import dataclasses
 from datetime import datetime
 import json
 from pathlib import Path
@@ -61,17 +60,15 @@ sys.path.insert(0, str(ROOT))
 
 from gx4m_real.policy import RslRlActor                         # noqa: E402
 from gx4m_real.robot.arm import ArmDriver                       # noqa: E402
-from gx4m_real.robot.compensation import JointCompensation      # noqa: E402
-from gx4m_real.robot.config import load_config                  # noqa: E402
 from gx4m_real.robot.hand import HandDriver                     # noqa: E402
 from gx4m_real.robot.kinematics import matrix_quat, quat_matrix  # noqa: E402
 from tasks.dexlong_gear3.step1 import (ESTIMATORS, MODELS, REFERENCES, Step1Interface, load_reference,  # noqa: E402
                                        start_check, step_key)
+from tasks.dexlong_gear3.arm_setup import (CONTROL_CONFIG, HAND_START_TOLERANCE,  # noqa: E402,F401
+                                           arm_config_for_reference)
 
 MODEL = MODELS[1]
-CONTROL_CONFIG = ROOT/'apps'/'control'/'config.yaml'
 START_RANGE = .02           # trained gear start: +-2 cm in x and y (reset_position_noise), any yaw
-HAND_START_TOLERANCE = .1   # rad; current-based position control stops a little short of the goal
 
 
 def pose_matrix(pos, quat):
@@ -420,24 +417,9 @@ def load_actor(path, iface):
 
 
 def arm_config(path, iface, handeye=None, velocity=None):
-    """Control config at the trained PVT speed limit (or velocity). A hand-eye result that records its joint
-    compensation replaces the control one: its calibrated camera is only consistent with that compensation."""
-    config = load_config(path)
-    config = dataclasses.replace(config, velocity_limit=velocity or float(max(iface.ref['velocity_limit'][:7])))
-    recorded = json.loads(Path(handeye).read_text(encoding='utf-8')).get('joint_compensation') if handeye else None
-    if recorded:
-        compensation = JointCompensation(tuple(recorded['directions']), tuple(recorded['offsets_deg']))
-        if compensation != config.compensation:
-            print(f"Joint compensation of the hand-eye result ({recorded.get('source', handeye)}), offsets "
-                  f"{list(compensation.offsets_deg)} deg, replaces {config.compensation_path} "
-                  f"({list(config.compensation.offsets_deg)} deg)")
-        config = dataclasses.replace(config, compensation=compensation,
-                                     compensation_path=Path(recorded['source']) if 'source' in recorded else None)
-    model_lower, model_upper = config.compensation.model_limits(config.lower, config.upper)
-    gap = max(np.abs(model_lower - iface.lower[:7]).max(), np.abs(model_upper - iface.upper[:7]).max())
-    if gap > np.radians(1.):
-        print(f'WARNING: real arm limits differ from the trained ones by up to {np.degrees(gap):.1f} deg')
-    return config
+    """Control config at the trained PVT speed limit (or velocity), with the hand-eye result's joint compensation
+    when it records one (arm_setup.arm_config_for_reference, shared with the trajectory replay)."""
+    return arm_config_for_reference(path, iface.ref, handeye, velocity)
 
 
 def add_tactile_args(parser):

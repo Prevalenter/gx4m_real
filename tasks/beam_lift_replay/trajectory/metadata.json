@@ -1,7 +1,7 @@
 {
-  "checkpoint": "logs\\rsl_rl\\gx4m_dexlong_beam_step1_lift\\2026-11-12_18-39-14\\model_10000.pt",
-  "environment": 8,
-  "steps": 135,
+  "checkpoint": "logs\\rsl_rl\\gx4m_dexlong_beam_step1_lift\\2026-11-13_07-55-36\\model_3000.pt",
+  "environment": 25,
+  "steps": 152,
   "success": true,
   "success_definition": "task retracted flag (lift goal reached)",
   "nominal_evaluation": false,

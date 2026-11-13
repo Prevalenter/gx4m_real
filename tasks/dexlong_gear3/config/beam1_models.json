@@ -1,38 +1,27 @@
 {
   "files": [
     {
-      "name": "beam1_lstm_20261111_233133_iter1000.pt",
-      "path": "/gx4m_models/gx4m_real/beam1_20261111_233133_iter1000/beam1_lstm_20261111_233133_iter1000.pt",
-      "fs_id": 519497298390648,
-      "size": 16564917,
-      "sha256": "77ee5c8b7674fc59dc3dba99b55e5f024e381e3a05673bbfb1328aa3b725b42d"
+      "name": "beam1_lstm_20261112_183914_iter10000.pt",
+      "path": "/gx4m_models/gx4m_real/beam1_20261112_183914_iter10000/beam1_lstm_20261112_183914_iter10000.pt",
+      "fs_id": 989859823030780,
+      "size": 16565012,
+      "sha256": "8981bde9953ae29392b2b6826d3384d29a250b5438937bc7e8239532086a978f"
     },
     {
-      "name": "beam1_estimator_20261111_233133_iter1000.pt",
-      "path": "/gx4m_models/gx4m_real/beam1_20261111_233133_iter1000/beam1_estimator_20261111_233133_iter1000.pt",
-      "fs_id": 1077042477033249,
-      "size": 6629517,
-      "sha256": "e4e290f7aa202ff9f2445244c69b41de287aad258323624b7145acd893940159"
+      "name": "beam1_estimator_20261112_183914_iter10000.pt",
+      "path": "/gx4m_models/gx4m_real/beam1_20261112_183914_iter10000/beam1_estimator_20261112_183914_iter10000.pt",
+      "fs_id": 520228197629917,
+      "size": 6629571,
+      "sha256": "608b820abdff9ea2e857c6b45e5261eaa905813f0dbbda242f8fb6c7370d89e1"
     }
   ],
   "task": "beam_step1_lift",
-  "training_run": "2026-11-11_23-31-33",
-  "iteration": 1000,
+  "training_run": "2026-11-12_18-39-14",
+  "iteration": 10000,
   "policy_observations": 83,
   "actions": 23,
   "estimator_axes": 2,
-  "training_randomization": {
-    "object_size_scale_range": [
-      0.8,
-      1.2
-    ],
-    "independent_axes": true,
-    "occlusion_share": 1.0,
-    "position_noise_std_m": 0.003,
-    "position_bias_std_m": 0.003,
-    "goal_bias_std_m": 0.001,
-    "rotation_noise_deg": 2.0,
-    "rotation_bias_deg": 1.0
-  },
-  "training_provenance": "run.json, environment.yaml and initial_pose_snapshot.json in logs/rsl_rl/gx4m_dexlong_beam_step1_lift/2026-11-11_23-31-33"
+  "tactile_rate_hz": 5.0,
+  "tactile_average_frames": true,
+  "pose_estimator_rate_hz": 5.0
 }

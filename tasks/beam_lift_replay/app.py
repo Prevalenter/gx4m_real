@@ -10,9 +10,13 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from gx4m_real.robot.config import ARM_JOINTS, load_config, validate_position
+from gx4m_real.robot.config import ARM_JOINTS, validate_position
 from gx4m_real.robot.hand import HAND_JOINTS, LOWER, UPPER, HandDriver
 from gx4m_real.robot.arm import ArmDriver
+from tasks.dexlong_gear3.arm_setup import CONTROL_CONFIG, HAND_START_TOLERANCE, arm_config_for_reference
+
+ARM_START_TOLERANCE = .08   # rad
+REFERENCE = ROOT/'tasks/dexlong_gear3/config/beam1_reference.json'
 
 
 def load_targets(path, config):
@@ -47,7 +51,10 @@ class ReplayApp:
         import yourdfpy
         from viser.extras import ViserUrdf
         self.args = args
-        self.config = load_config(args.config)
+        # Same arm setup as the policy runner (run_step1.py): the trained PVT speed limit and, with --handeye,
+        # the joint compensation recorded with that hand-eye calibration.
+        reference = json.loads(Path(args.reference).read_text(encoding='utf-8'))
+        self.config = arm_config_for_reference(args.config, reference, args.handeye, args.arm_velocity)
         self.data, self.times, self.q = load_targets(args.trajectory, self.config)
         self.arm = self.hand = None
         self.mode = 'idle'
@@ -85,6 +92,12 @@ class ReplayApp:
         values = [q[self.mapping[n]] if n in self.mapping else self.config.initial_joints[n] for n in self.names]
         self.visual.update_cfg(np.array(values))
         self.clock.value = f'{self.times[self.index]:.3f} s'
+
+    def at_start(self, q):
+        """Measured q (23,) at the first target: arm within 0.08 rad, fingers within HAND_START_TOLERANCE
+        (current-based position control stops a little short of the goal, as in run_step1.py)."""
+        error = np.abs(q-self.q[0])
+        return error[:7].max() <= ARM_START_TOLERANCE and error[7:].max() <= HAND_START_TOLERANCE
 
     def measured(self):
         self.arm.update()
@@ -124,8 +137,9 @@ class ReplayApp:
             if self.arm is not None:
                 return
             arm = ArmDriver(self.config, mock=not self.args.real)
+            # Current limit and goal current as the policy runner's HandDriver (defaults 1000 / 600 mA).
             hand = HandDriver(port=self.args.hand_port, serial_number=self.args.hand_serial,
-                              mock=not self.args.real, curr_limit=self.args.hand_current,
+                              mock=not self.args.real, curr_limit=max(1000, self.args.hand_current),
                               goal_current=self.args.hand_current)
             try:
                 arm.connect()
@@ -155,7 +169,7 @@ class ReplayApp:
                 raise RuntimeError('Connect hardware first')
             if self.arm is not None:
                 q = self.measured()
-                if np.max(np.abs(q[:7]-self.q[0, :7])) > .08 or np.max(np.abs(q[7:]-self.q[0, 7:])) > .1:
+                if not self.at_start(q):
                     raise RuntimeError('Robot is not at the first target; Move to start first')
             self.index = 0
             self.frame.disabled = True
@@ -175,8 +189,7 @@ class ReplayApp:
             self.send(self.home_q)
             self.draw(self.home_q)
             if np.max(np.abs(self.home_q-self.q[0])) < 1e-6:
-                actual = self.measured()
-                if np.max(np.abs(actual-self.q[0])) < .08:
+                if self.at_start(self.measured()):
                     self.mode = 'idle'
                     self.frame.disabled = False
                     self.status.value = 'At start; ready to play'
@@ -228,14 +241,23 @@ class ReplayApp:
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--trajectory', type=Path, default=Path(__file__).parent/'trajectory/joint_targets.json')
-    p.add_argument('--config', type=Path, default=ROOT/'apps/control/config.yaml')
+    p.add_argument('--config', type=Path, default=CONTROL_CONFIG)
+    p.add_argument('--reference', type=Path, default=REFERENCE,
+                   help='Policy reference whose trained arm PVT speed limit is used')
+    p.add_argument('--handeye', type=Path,
+                   help='handeye_result.json: its recorded joint compensation, as run_step1.py (required with --real)')
+    p.add_argument('--arm-velocity', type=float, help='PVT speed limit, rad/s (default: the trained limit)')
     p.add_argument('--host', default='127.0.0.1')
     p.add_argument('--port', type=int, default=8090)
     p.add_argument('--real', action='store_true')
     p.add_argument('--hand-port')
     p.add_argument('--hand-serial')
-    p.add_argument('--hand-current', type=int, default=300, help='Hand current limit and goal current, mA')
-    ReplayApp(p.parse_args()).run()
+    p.add_argument('--hand-current', type=int, default=600,
+                   help='Hand goal current, mA (current limit max(1000, this)); default as run_step1.py')
+    args = p.parse_args()
+    if args.real and args.handeye is None:
+        p.error('--handeye is required with --real (the joint compensation must match the policy deployment)')
+    ReplayApp(args).run()
 
 
 if __name__ == '__main__':

@@ -11,14 +11,14 @@ bash tasks/beam_lift_replay/run.sh
 真机模式：
 
 ```bash
-bash tasks/beam_lift_replay/run.sh --real --hand-port /dev/ttyUSB0
+bash tasks/beam_lift_replay/run.sh --real --hand-port /dev/ttyUSB0 \n    --handeye apps/charuco_handeye/runtime/<session>/calibration/handeye_result.json
 ```
 
-也可使用 `--hand-serial SERIAL`。端口和设备配置沿用 `apps/control/config.yaml`，机械臂使用其关节补偿，灵巧手使用现有 GEX16 方向和零点映射。手电流上限和目标电流默认均为 300 mA，可用 `--hand-current` 修改；它不等同于仿真的 0.32 N·m 力矩上限。
+也可使用 `--hand-serial SERIAL`。端口和设备配置沿用 `apps/control/config.yaml`，灵巧手使用现有 GEX16 方向和零点映射。机械臂设置与策略部署 `run_step1.py` 一致（共用 `tasks/dexlong_gear3/arm_setup.py`）：真机模式必须给 `--handeye`，使用该手眼标定记录的关节补偿（替换 `apps/control/joint_compensation.yaml`）；PVT 速度上限取训练值（`beam1_reference.json` 的 `velocity_limit`，1.5 rad/s），可用 `--arm-velocity` 修改。手目标电流默认 600 mA、电流上限 1000 mA，与 `run_step1.py` 相同，可用 `--hand-current` 修改；它不等同于仿真的 0.32 N·m 力矩上限。
 
 1. 关闭其他占用机械臂 CAN 或手部串口的控制程序，按仿真初始位置放好 beam。
 2. 点击 **Connect hardware**：连接并保持当前位置。
-3. 点击 **Move to start**：机械臂和手以每关节至多 0.2 rad/s 移至首帧目标。
+3. 点击 **Move to start**：机械臂和手以每关节至多 0.2 rad/s 移至首帧目标；实测机械臂误差 ≤ 0.08 rad、手指误差 ≤ 0.1 rad 即视为到位（手指电流位置控制会略停在目标前，与 `run_step1.py` 相同）。
 4. 点击 **Play once · 30 Hz**：同步下发机械臂 7 轴和手部 16 轴，执行一次后保持末帧。
 5. **Stop / hold** 中断后保持实测位置。Ctrl+C 也请求保持；通信故障时保持命令可能无法送达。退出不主动失能机械臂。
 

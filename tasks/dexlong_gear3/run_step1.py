@@ -64,7 +64,7 @@ from gx4m_real.robot.hand import HandDriver                     # noqa: E402
 from gx4m_real.robot.kinematics import matrix_quat, quat_matrix  # noqa: E402
 from tasks.dexlong_gear3.step1 import (ESTIMATORS, MODELS, REFERENCES, Step1Interface, load_reference,  # noqa: E402
                                        start_check, step_key)
-from tasks.dexlong_gear3.arm_setup import (CONTROL_CONFIG, HAND_START_TOLERANCE,  # noqa: E402,F401
+from tasks.dexlong_gear3.arm_setup import (CONTROL_CONFIG, DEFAULT_HANDEYE, HAND_START_TOLERANCE,  # noqa: E402,F401
                                            arm_config_for_reference)
 
 MODEL = MODELS[1]
@@ -452,7 +452,8 @@ def main(argv=None):
                         help='Split step 1 or 2, or beam1 (Beam part 2 lift)')
     parser.add_argument('--model', type=Path, help="Default: the step's deployed model")
     parser.add_argument('--config', type=Path, default=CONTROL_CONFIG, help='Arm config (CAN, limits, compensation)')
-    parser.add_argument('--handeye', type=Path, help='handeye_result.json (required without --mock)')
+    parser.add_argument('--handeye', type=Path, default=DEFAULT_HANDEYE,
+                        help='Hand-eye result (default: he_20261109_contact_plate, J1 +11.1842 deg)')
     parser.add_argument('--mesh-to-object', type=Path, help='4x4 (np.loadtxt) mesh frame -> Isaac gear frame')
     parser.add_argument('--pose-port', type=int, default=5701)
     parser.add_argument('--pose-remote', action='store_true', help='Perception on another host: age from receive time')

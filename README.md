@@ -302,7 +302,7 @@ bash tasks/dexlong_gear3/perception/run_replay.sh
 - 固定相机：`T_world_base @ T_base_cam`
 - 腕部相机：`FK(Link7) @ T_flange_cam`
 
-手眼标定结果取相机外参 `T_base_cam` / `T_flange_cam`，以及求解它时用的关节补偿（`handeye_result.json` 的 `joint_compensation`）：外参只和这组补偿一致，所以它替换 `apps/control/joint_compensation.yaml`，不同时会打印两组偏移。现在的外参 `he_20261102_185319_j1p87` 带 J1 +8.7°，控制配置是 J1 = 0，主循环和下面的控制进程都按 +8.7° 换算。`T_world_base` 一律用参考配置里的基座位姿：主循环用 `step1_reference.json`，感知工具用 `initial_pose.json`。标定文件里记录的基座位姿只是采集时的值，和参考配置不一致时会打印提示。这样训练侧换了基座，旧标定仍可使用，前提是相机和机械臂之间的相对位置没变。
+手眼标定结果取相机外参 `T_base_cam` / `T_flange_cam`，以及求解它时用的关节补偿（`handeye_result.json` 的 `joint_compensation`）：外参只和这组补偿一致，所以它替换 `apps/control/joint_compensation.yaml`，不同时会打印两组偏移。部署主循环、控制进程和轨迹重放默认使用 `apps/charuco_handeye/runtime/he_20261109_contact_plate/calibration/handeye_result.json`（J1 +11.1842°），无需再传 `--handeye`；仍可用该参数指定其他标定。感知进程的 `--calibration` 应指定同一份文件。`T_world_base` 一律用参考配置里的基座位姿：主循环用 `step1_reference.json`，感知工具用 `initial_pose.json`。标定文件里记录的基座位姿只是采集时的值，和参考配置不一致时会打印提示。这样训练侧换了基座，旧标定仍可使用，前提是相机和机械臂之间的相对位置没变。
 
 ```bash
 # 感知（另一个终端）：Viser 摆放检查，同时把位姿转发给主循环

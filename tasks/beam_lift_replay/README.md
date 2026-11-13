@@ -3,19 +3,20 @@
 仓库根目录启动离线预览（不连接硬件）：
 
 ```bash
-bash tasks/beam_lift_replay/run.sh --handeye apps/charuco_handeye/runtime/he_20261109_contact_j1_45_j2_0/calibration/handeye_result.json
+bash tasks/beam_lift_replay/run.sh
 ```
 
 打开 http://127.0.0.1:8090 ，点击 **Play once · 30 Hz**。帧滑块仅预览，不发送目标。
 
+页面也有 **Play once · 10 Hz**：同一条轨迹逐帧以 10 Hz 重放，不跳帧、关节目标不变，耗时约为 30 Hz 的三倍（当前轨迹约 13.4 秒）。两种速度均支持离线预览、真机重放和采集；运行中不能直接切换，需要先 Stop。Move to start 仍按原有 30 Hz 控制、0.2 rad/s 回位，末端收敛采集时长仍由 `--record-tail` 指定，不随慢放倍率变化。
+
 真机模式：
 
 ```bash
-bash tasks/beam_lift_replay/run.sh --real --hand-port /dev/ttyUSB0 \
-  --handeye apps/charuco_handeye/runtime/he_20261109_contact_j1_45_j2_0/calibration/handeye_result.json
+bash tasks/beam_lift_replay/run.sh --real --hand-port /dev/ttyUSB0
 ```
 
-也可使用 `--hand-serial SERIAL`。端口和设备配置沿用 `apps/control/config.yaml`，机械臂与 step1 lift 一样，用 `--handeye` 标定文件内的 `joint_compensation` 替换控制配置的补偿；真机模式必须显式指定，并且该文件必须包含补偿。路径应与当前实际使用的标定一致，上面的路径是本机现有的辨识结果，其他机器需提供自己的文件。启动终端和页面均显示生效的补偿来源与零点偏移。离线不传 `--handeye` 时仍使用控制配置的补偿进行限位检查。显示始终使用轨迹模型角，补偿用于电机角转换、限位检查和实测角反变换，不对模型显示重复叠加偏移。
+也可使用 `--hand-serial SERIAL`。端口和设备配置沿用 `apps/control/config.yaml`，机械臂与 step1 lift 一样，用手眼标定文件内的 `joint_compensation` 替换控制配置的补偿。部署与重放（含离线预览）默认使用 `apps/charuco_handeye/runtime/he_20261109_contact_plate/calibration/handeye_result.json`，J1 零位补偿为 +11.1842°，无需显式传参；可用 `--handeye` 覆盖默认路径，该文件必须包含补偿。其他机器需确认标定适用于当地硬件。启动终端和页面均显示生效的补偿来源与零点偏移。显示始终使用轨迹模型角，补偿用于电机角转换、限位检查和实测角反变换，不对模型显示重复叠加偏移。
 
 机械臂设置与策略部署 `run_step1.py` 共用 `tasks/dexlong_gear3/arm_setup.py`，PVT 速度上限取 `beam1_reference.json` 的训练值（1.5 rad/s），可用 `--arm-velocity` 修改。
 
@@ -42,13 +43,71 @@ bash tasks/beam_lift_replay/run.sh --real --hand-port /dev/ttyUSB0 \
 
 ```bash
 bash tasks/dexlong_gear3/perception/run_setup.sh --step beam1 \
-  --calibration apps/charuco_handeye/runtime/he_20261109_contact_j1_45_j2_0/calibration/handeye_result.json \
+  --calibration apps/charuco_handeye/runtime/he_20261109_contact_plate/calibration/handeye_result.json \
   --robot '' --target 127.0.0.1:5711
 ```
 
 重放页面仍为 `http://127.0.0.1:8090`，感知页面为 `http://127.0.0.1:8088`。两边必须使用同一个实际标定文件。可用本程序的 `--pose-port` 修改接收端口，同时修改感知命令的 `--target`。此数据仅用于显示，轨迹执行仍为开环；没有感知输入时会明确显示“等待实时感知”。离线预览也可接入感知，不会因此连接机械臂。
 
+## 手动采集 10 次 Sim-to-real 对比
+
+真机重放命令追加下面的参数（感知仍按上面的独立终端命令启动）：
+
+```bash
+bash tasks/beam_lift_replay/run.sh --real --hand-port /dev/ttyUSB0 \
+  --record-dir runtime/beam_replay_gap --record-trials 10 --record-tail 1
+```
+
+此模式**不自动连跑、不自动复位**。每次手动确认安全后 Move to start，按黄色参考摆放 beam，检查蓝色追踪，再 Play。
+采集启动要求实时位姿在 200 ms 内更新；中途追踪丢失不会自动停止开环运动，分析会排除过期位姿。
+结束后继续保持末帧并记录 1 秒收敛过程，再保存一次 trial。人工移走/复位物体并确认回程路径安全后，才进行下一次；不要在重物仍被夹持时盲目回位。
+采满 10 次完整重放后拒绝继续 Play；Stop、故障和 Ctrl+C 会保存已有的部分数据，不计入完成次数。
+未完成末端收敛采样前中止的试次也不算完整。没有启用采集时保持原行为。
+
+页面“采集进度”和终端显示会话目录：`runtime/beam_replay_gap/<时间戳>/`。
+每次保存 `trial_001.npz` 等文件，包含命令时刻、轨迹相位、23 轴目标、7 轴机械臂实测角、16 轴手实测角、各自时间戳、Beam 世界变换和感知时间戳。
+每次 trial 另存 `requested_replay_hz`（30 或 10），分析报告也保留该值；10 Hz 的 `wall_to_nominal_ratio` 约为 3 是有意慢放，不应直接视为通信降速。
+机械臂来自 SDK 缓存反馈并保留反馈时间；手部是同步串口读取，保留读取起止时间，分析采用其中点，不能视为 16 个电机硬件同步采样。
+采集增加手部串口读流量，可能使控制循环降速；报告中实际频率和读耗时用于辨别这种影响。不会将发送成功冒充实测跟踪。
+`session.json` 保存运行参数、补偿、代码提交和参考文件 SHA256；`reference/` 保存本次轨迹、sim 实测关节、sim Beam 位置、配置和标定快照，后续更新代码不会改变本次对比基准。
+这些包含标定的数据默认位于忽略的 `runtime/` 中，不要随意上传。
+
+采完后在 `gear3_control` 环境分析（将最后的目录替换为终端显示的会话目录）：
+
+```bash
+conda activate gear3_control
+python -m tasks.beam_lift_replay.analyze runtime/beam_replay_gap/<时间戳> --plot
+```
+
+生成 `summary.json` 和可用浏览器打开的 `comparison.svg`（无需新增依赖；不加 `--plot` 只生成数值报告）。重点看：
+
+- `command_hz` 是否接近 30、`wall_to_nominal_ratio` 是否接近 1：先检查是否整条重放被通信拖慢。
+- `arm/hand.vs_command`：真机对已发送目标的逐关节 RMSE、最大误差和结束保持后的残差，单位度。
+- `vs_sim_phase_aligned`：相同轨迹进度的真机与 sim 实测关节差；`vs_sim_wall_time` 则保留慢放影响，不通过时间对齐掩盖降速。
+- `beam`：绝对世界位置差、去除首个有效观测位置偏移后的位移差，以及有效观测区间内抬升量；朝向没有 sim 过程真值，因此不伪造朝向差。
+- `beam_fresh_fraction`、首末有效相位、机械臂反馈年龄：追踪不完整或反馈过期时不能仅凭低误差判断跟上。
+
+仿真中实际物体质量和接触条件是随机化的一次成功样本；真机 10 次体现重复性，不代表能覆盖全部 sim 域随机化。位置差也包含标定/追踪误差，不能全部归因于动力学。
+不自动判定安全或通过，不改变目标/电流、不启动真机运动。建议先采 1 次确认频率和日志，再收集其余 9 次；没有采集本次真机接触力或视频。
+
 ## 轨迹和时间
+
+### 2026-11-14 真机采集数据
+
+会话 `20261114_023848_319463` 包含 10 次完整的 30 Hz 重放，已打包上传百度网盘；压缩包同时包含 `session.json` 和 `reference/` 快照（含标定），不将原始数据提交 Git。下载清单为 `reports/beam_replay_gap_20261114_023848_319463_baidu.json`，记录网盘路径、文件 ID、大小与 SHA256，已通过下载回读校验。
+
+配置好本机网盘凭据后，在仓库根目录下载并解压：
+
+```bash
+python scripts/baidu_models.py download \
+  --manifest reports/beam_replay_gap_20261114_023848_319463_baidu.json \
+  --out runtime/beam_replay_gap
+tar -xzf runtime/beam_replay_gap/20261114_023848_319463.tar.gz -C runtime/beam_replay_gap
+```
+
+仅在目标会话目录不存在时解压，避免覆盖已有采集数据。标定快照仅适用于对应硬件和采集环境。
+
+### 仿真来源
 
 - Source: `2026-11-13_13-58-15/model_1500.pt`, 536 frames at 120 Hz, 4.458333 seconds.
 - Successful lift: 21.60 cm; randomized mass: 101.80 g.

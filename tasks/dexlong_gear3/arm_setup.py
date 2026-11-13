@@ -14,6 +14,7 @@ from gx4m_real.robot.config import load_config
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTROL_CONFIG = ROOT/'apps'/'control'/'config.yaml'
+DEFAULT_HANDEYE = ROOT/'apps/charuco_handeye/runtime/he_20261109_contact_plate/calibration/handeye_result.json'
 HAND_START_TOLERANCE = .1   # rad; current-based position control stops a little short of the goal
 
 

@@ -43,6 +43,7 @@ from gx4m_real.camera.frame_ipc import receive, send            # noqa: E402
 from gx4m_real.robot.arm import ArmDriver                       # noqa: E402
 from gx4m_real.robot.hand import HandDriver                     # noqa: E402
 from gx4m_real.robot.kinematics import matrix_quat               # noqa: E402
+from tasks.dexlong_gear3.arm_setup import DEFAULT_HANDEYE        # noqa: E402
 from tasks.dexlong_gear3.run_step1 import (CONTROL_CONFIG, HAND_START_TOLERANCE,  # noqa: E402
                                            CameraToEnv, Step1Runner, UdpGearPose, add_tactile_args, arm_config,
                                            load_actor, open_tactile, save_episode)
@@ -313,7 +314,8 @@ def write_key(path=KEY_PATH):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--handeye', type=Path, help='handeye_result.json (required without --mock)')
+    parser.add_argument('--handeye', type=Path, default=DEFAULT_HANDEYE,
+                        help='Hand-eye result (default: he_20261109_contact_plate, J1 +11.1842 deg)')
     parser.add_argument('--step', type=step_key, choices=list(REFERENCES), default=1,
                         help='Split step 1 or 2, or beam1 (Beam part 2 lift); start step1_setup.py with the same --step')
     parser.add_argument('--model', type=Path, help="Default: the step's deployed model")

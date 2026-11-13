@@ -17,7 +17,9 @@ from gx4m_real.robot.hand import HAND_JOINTS, LOWER, UPPER, HandDriver
 from gx4m_real.robot.arm import ArmDriver
 from gx4m_real.robot.compensation import JointCompensation
 from tasks.beam_lift_replay.beam_view import BeamView
-from tasks.dexlong_gear3.arm_setup import CONTROL_CONFIG, HAND_START_TOLERANCE, arm_config_for_reference
+from tasks.beam_lift_replay.recording import ReplayRecorder
+from tasks.dexlong_gear3.arm_setup import (CONTROL_CONFIG, DEFAULT_HANDEYE, HAND_START_TOLERANCE,
+                                          arm_config_for_reference)
 
 ARM_START_TOLERANCE = .08
 REFERENCE = ROOT/'tasks/dexlong_gear3/config/beam1_reference.json'
@@ -97,12 +99,16 @@ class ReplayApp:
         self.data, self.times, self.q = load_targets(args.trajectory, self.config)
         self.arm = self.hand = None
         self.mode = 'idle'
+        self.play_hz = 30
         self.index = 0
         self.events = queue.Queue()
         self.closed = False
         self.last_target = self.q[0].copy()
         self.arm_rate, self.hand_rate = CommandRate(), CommandRate()
         self.rates_shown = -float('inf')
+        self.recorder = (ReplayRecorder(args.record_dir, args, self.config, self.times, self.q)
+                         if args.record_dir is not None else None)
+        self.tail_deadline = None
         self.server = viser.ViserServer(host=args.host, port=args.port)
         self.server.scene.set_up_direction('+z')
         self.server.scene.add_grid('/ground', plane='xy', width=2, height=2)
@@ -113,7 +119,7 @@ class ReplayApp:
         self.names = list(self.model.actuated_joint_names)
         self.mapping = dict(zip(self.data['joint_names'], range(23)))
         self.gui = self.server.gui
-        self.gui.add_markdown('## Beam lift · 30 Hz\n' +
+        self.gui.add_markdown('## Beam lift · 30 / 10 Hz\n' +
                              ('**Real hardware mode**' if args.real else '**Offline preview (no hardware)**') +
                              '\n\n23 joint targets, radians. Robot shows commanded positions. '
                              'Connect → Move to start → Play. Stop holds measured positions. '
@@ -124,18 +130,23 @@ class ReplayApp:
                               f'**零点偏移**：{offsets}\n\n'
                               '模型角用于显示，发送电机目标时应用方向和零点补偿；不会重复叠加偏移。')
         self.status = self.gui.add_text('Status', initial_value='Ready', disabled=True)
+        self.record_status = self.gui.add_text('采集进度', initial_value=(
+            self.recorder.status if self.recorder else '未启用；使用 --record-dir 开启'), disabled=True)
         self.frame = self.gui.add_slider('Frame', min=0, max=len(self.q)-1, step=1, initial_value=0)
         self.clock = self.gui.add_text('Trajectory time', initial_value='0.000 s', disabled=True)
         with self.gui.add_folder('实时控制频率'):
-            self.gui.add_markdown('最近 1 秒成功下发的轨迹目标频率，每 0.25 秒刷新，目标为 30 Hz。'
+            self.gui.add_markdown('最近 1 秒成功下发的轨迹目标频率，每 0.25 秒刷新，目标由重放按钮选择。'
+                                  '10 Hz 逐帧慢放，耗时约为 30 Hz 的三倍，不跳帧。'
                                   '不是电机内部伺服频率或 CAN 总线帧率；保持阶段无新轨迹目标时显示 0 Hz，'
                                   '不表示电机已失能。离线模拟会明确标注。')
             self.arm_hz = self.gui.add_text('机械臂目标下发', initial_value='未连接', disabled=True)
             self.hand_hz = self.gui.add_text('灵巧手目标下发', initial_value='未连接', disabled=True)
+            self.target_hz = self.gui.add_text('重放目标频率', initial_value='30 Hz', disabled=True)
         self.beam = BeamView(self.server, self.data, args.trajectory, self.config,
                              handeye=args.handeye, pose_port=args.pose_port)
         for label, action in [('Connect hardware' if args.real else 'Connect mock robot', 'connect'),
                               ('Move to start (0.2 rad/s)', 'home'), ('Play once · 30 Hz', 'play'),
+                              ('Play once · 10 Hz', 'play10'),
                               ('Stop / hold', 'stop')]:
             button = self.gui.add_button(label)
             button.on_click(lambda _, action=action: self.events.put(action))
@@ -200,9 +211,17 @@ class ReplayApp:
             if errors:
                 raise RuntimeError('; '.join(errors))
 
+    def finish_recording(self, outcome):
+        if self.recorder is not None:
+            self.recorder.finish(outcome)
+            self.record_status.value = self.recorder.status
+
     def action(self, action):
         if action == 'stop':
-            self.hold()
+            try:
+                self.hold()
+            finally:
+                self.finish_recording('stopped')
             self.status.value = 'Stopped; holding measured positions'
         elif action == 'connect':
             if self.arm is not None:
@@ -234,19 +253,32 @@ class ReplayApp:
             self.index = 0
             self.frame.disabled = True
             self.status.value = 'Moving to first target at up to 0.2 rad/s'
-        elif action == 'play':
+        elif action in ('play', 'play10'):
             if self.mode != 'idle':
                 raise RuntimeError('Stop the current operation first')
             if self.args.real and self.arm is None:
                 raise RuntimeError('Connect hardware first')
+            if self.recorder is not None and self.arm is None:
+                raise RuntimeError('Connect hardware or mock robot before recording')
             if self.arm is not None:
                 q = self.measured()
                 if not self.at_start(q):
                     raise RuntimeError('Robot is not at the first target; Move to start first')
+            play_hz = 10 if action == 'play10' else 30
+            if self.recorder is not None:
+                if self.args.real and (self.beam.latest is None or
+                                       time.monotonic() - self.beam.latest[0] > .2):
+                    raise RuntimeError('Recording needs a fresh beam pose (within 200 ms); check perception')
+                self.recorder.start(play_hz)
+                self.last_target = self.q[0].copy()
+                self.recorder.sample(self, 0.)
+                self.record_status.value = self.recorder.status
             self.index = 0
             self.frame.disabled = True
             self.mode = 'play'
-            self.status.value = 'Playing once at 30 Hz'
+            self.play_hz = play_hz
+            self.target_hz.value = f'{play_hz} Hz'
+            self.status.value = f'Playing once at {play_hz} Hz'
         elif action == 'seek' and self.mode == 'idle':
             self.index = int(self.frame.value)
             self.draw(self.q[self.index])  # Preview only; never sends hardware commands.
@@ -268,18 +300,39 @@ class ReplayApp:
                     self.status.value = 'At start; ready to play'
         elif self.mode == 'play':
             q = self.q[self.index]
+            command_time = time.monotonic()
             if self.arm is not None:
                 self.send(q)
+            if self.recorder is not None:
+                self.recorder.sample(self, self.times[self.index], command_time)
             self.draw(q)
             self.frame.value = self.index
             if self.index == len(self.q)-1:
-                self.mode = 'idle'
-                self.frame.disabled = False
-                self.status.value = 'Completed; holding final target'
+                if self.recorder is not None:
+                    self.mode = 'settle'
+                    self.tail_deadline = time.monotonic() + self.args.record_tail
+                    self.status.value = 'Recording final-target settling; holding final target'
+                else:
+                    self.mode = 'idle'
+                    self.frame.disabled = False
+                    self.status.value = 'Completed; holding final target'
             else:
                 self.index += 1
+        elif self.mode == 'settle':
+            self.arm.update()
+            if self.arm.snapshot()['mode'] == 'fault':
+                raise RuntimeError(self.arm.snapshot()['error'])
+            self.recorder.sample(self, self.times[-1])
+            if time.monotonic() >= self.tail_deadline:
+                self.mode = 'idle'
+                self.frame.disabled = False
+                self.finish_recording('completed')
+                self.status.value = 'Saved; manually reset beam and Move to start before next trial'
         elif self.arm is not None:
             self.measured()
+
+    def tick_period(self):
+        return 1 / (self.play_hz if self.mode == 'play' else 30)
 
     def run(self):
         deadline = time.monotonic()
@@ -293,20 +346,24 @@ class ReplayApp:
                         self.hold()
                     except Exception as hold_error:
                         exc = RuntimeError(f'{exc}; hold: {hold_error}')
+                    self.finish_recording('error: ' + str(exc))
                     self.status.value = f'Error: {exc}'
                 self.refresh_rates()
-                deadline += 1/30
+                period = self.tick_period()
+                deadline += period
                 now = time.monotonic()
                 if now > deadline:
                     # Do not burst commands or skip targets when hardware is late.
-                    if now-deadline > 1/30 and self.mode == 'play':
-                        self.status.value = 'Playing; hardware loop late, replay is running slower than 30 Hz'
+                    if now-deadline > period and self.mode == 'play':
+                        self.status.value = (f'Playing; hardware loop late, replay is running slower than '
+                                             f'{self.play_hz} Hz')
                     deadline = now
                 time.sleep(max(0., deadline-time.monotonic()))
         except KeyboardInterrupt:
             try:
                 self.hold()
             finally:
+                self.finish_recording('interrupted')
                 self.beam.close()
                 self.server.stop()
                 # Keep arm enabled and held on exit, as in the existing robot server.
@@ -320,8 +377,8 @@ def parse_args(argv=None):
     p.add_argument('--config', type=Path, default=CONTROL_CONFIG)
     p.add_argument('--reference', type=Path, default=REFERENCE,
                    help='Policy reference whose trained arm PVT speed limit is used')
-    p.add_argument('--handeye', type=Path,
-                   help='handeye_result.json: its recorded joint compensation, as run_step1.py (required with --real)')
+    p.add_argument('--handeye', type=Path, default=DEFAULT_HANDEYE,
+                   help='Hand-eye result (default: he_20261109_contact_plate, J1 +11.1842 deg), as run_step1.py')
     p.add_argument('--arm-velocity', type=float, help='PVT speed limit, rad/s (default: the trained limit)')
     p.add_argument('--host', default='127.0.0.1')
     p.add_argument('--port', type=int, default=8090)
@@ -330,9 +387,14 @@ def parse_args(argv=None):
     p.add_argument('--hand-serial')
     p.add_argument('--hand-current', type=int, default=600,
                    help='Hand goal current, mA (current limit max(1000, this)); default as run_step1.py')
+    p.add_argument('--record-dir', type=Path, help='Create a timestamped manually triggered acquisition session')
+    p.add_argument('--record-trials', type=int, default=10, help='Maximum completed trials per session')
+    p.add_argument('--record-tail', type=float, default=1., help='Record final-target settling for this many seconds')
     args = p.parse_args(argv)
     if args.real and args.handeye is None:
         p.error('--handeye is required in real hardware mode; use the same calibration as step1 lift')
+    if args.record_trials < 1 or not np.isfinite(args.record_tail) or args.record_tail < 0:
+        p.error('--record-trials must be positive and --record-tail must be finite and nonnegative')
     return args
 
 

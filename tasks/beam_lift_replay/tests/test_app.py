@@ -1,5 +1,4 @@
-import contextlib
-import io
+import argparse
 import json
 from pathlib import Path
 import tempfile
@@ -13,6 +12,7 @@ import numpy as np
 from gx4m_real.robot.config import load_config
 from tasks.beam_lift_replay.app import CommandRate, ROOT, ReplayApp, load_targets, parse_args, replay_config
 from tasks.beam_lift_replay.beam_view import BeamView, world_camera
+from tasks.dexlong_gear3.arm_setup import DEFAULT_HANDEYE
 
 
 class CompensationTests(unittest.TestCase):
@@ -71,12 +71,38 @@ class CompensationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     replay_config(self.config_path, self.path)
 
-    def test_real_mode_requires_explicit_handeye(self):
-        with contextlib.redirect_stderr(io.StringIO()):
-            with self.assertRaises(SystemExit):
-                parse_args(['--real'])
+    def test_default_handeye_and_explicit_override(self):
+        self.assertEqual(parse_args(['--real']).handeye, DEFAULT_HANDEYE)
         self.assertEqual(parse_args(['--real', '--handeye', str(self.path)]).handeye, self.path)
-        self.assertIsNone(parse_args([]).handeye)
+        self.assertEqual(parse_args([]).handeye, DEFAULT_HANDEYE)
+
+    def test_default_calibration_matches_deployment(self):
+        from tasks.dexlong_gear3.arm_setup import arm_config_for_reference
+
+        handeye = parse_args([]).handeye
+        reference = json.loads((ROOT/'tasks/dexlong_gear3/config/beam1_reference.json').read_text())
+        replay = replay_config(self.config_path, handeye, reference)
+        deployment = arm_config_for_reference(self.config_path, reference, handeye)
+        self.assertEqual(replay.compensation, deployment.compensation)
+        self.assertEqual(replay.compensation.offsets_deg,
+                         (11.1842, .4693, -2.1378, -.192, .54, -1.2316, 7.8836))
+        load_targets(ROOT/'tasks/beam_lift_replay/trajectory/joint_targets.json', replay)
+
+    def test_deployment_entrypoints_default_handeye_and_override(self):
+        from tasks.dexlong_gear3 import robot_server, run_step1
+
+        original_parse_args = argparse.ArgumentParser.parse_args
+        for entrypoint in (run_step1, robot_server):
+            for argv, expected in (([], DEFAULT_HANDEYE), (['--handeye', str(self.path)], self.path)):
+                with self.subTest(entrypoint=entrypoint.__name__, argv=argv):
+                    def check_args(parser, arguments):
+                        parsed = original_parse_args(parser, arguments)
+                        self.assertEqual(parsed.handeye, expected)
+                        raise InterruptedError
+
+                    with mock.patch.object(argparse.ArgumentParser, 'parse_args', check_args):
+                        with self.assertRaises(InterruptedError):
+                            entrypoint.main(argv)
 
     def test_offline_without_handeye_keeps_control_compensation(self):
         config = replay_config(self.config_path)

@@ -1,6 +1,8 @@
 """30 Hz synchronized arm/hand trajectory viewer and optional hardware replay."""
 from pathlib import Path
+from collections import deque
 import argparse
+import dataclasses
 import json
 import queue
 import sys
@@ -13,6 +15,44 @@ sys.path.insert(0, str(ROOT))
 from gx4m_real.robot.config import ARM_JOINTS, load_config, validate_position
 from gx4m_real.robot.hand import HAND_JOINTS, LOWER, UPPER, HandDriver
 from gx4m_real.robot.arm import ArmDriver
+from gx4m_real.robot.compensation import JointCompensation
+from tasks.beam_lift_replay.beam_view import BeamView
+
+
+class CommandRate:
+    def __init__(self, window=1.):
+        self.window = window
+        self.samples = deque()
+
+    def mark(self, now=None):
+        now = time.monotonic() if now is None else now
+        self.samples.append(now)
+        self.prune(now)
+
+    def prune(self, now):
+        while self.samples and now - self.samples[0] > self.window:
+            self.samples.popleft()
+
+    def hz(self, now=None):
+        now = time.monotonic() if now is None else now
+        self.prune(now)
+        if len(self.samples) < 2:
+            return 0.
+        elapsed = now - self.samples[0]
+        return (len(self.samples) - 1) / elapsed if elapsed > 0 else 0.
+
+
+def replay_config(path, handeye=None):
+    config = load_config(path)
+    if handeye is None:
+        return config
+    recorded = json.loads(Path(handeye).read_text(encoding='utf-8')).get('joint_compensation')
+    if not isinstance(recorded, dict) or not all(key in recorded for key in ('directions', 'offsets_deg')):
+        raise ValueError('Hand-eye result must contain joint_compensation directions and offsets_deg')
+    compensation = JointCompensation(tuple(recorded['directions']), tuple(recorded['offsets_deg']))
+    print(f'Joint compensation from {handeye}: directions {list(compensation.directions)}, '
+          f'offsets {list(compensation.offsets_deg)} deg', flush=True)
+    return dataclasses.replace(config, compensation=compensation, compensation_path=Path(handeye))
 
 
 def load_targets(path, config):
@@ -47,7 +87,7 @@ class ReplayApp:
         import yourdfpy
         from viser.extras import ViserUrdf
         self.args = args
-        self.config = load_config(args.config)
+        self.config = replay_config(args.config, args.handeye)
         self.data, self.times, self.q = load_targets(args.trajectory, self.config)
         self.arm = self.hand = None
         self.mode = 'idle'
@@ -55,6 +95,8 @@ class ReplayApp:
         self.events = queue.Queue()
         self.closed = False
         self.last_target = self.q[0].copy()
+        self.arm_rate, self.hand_rate = CommandRate(), CommandRate()
+        self.rates_shown = -float('inf')
         self.server = viser.ViserServer(host=args.host, port=args.port)
         self.server.scene.set_up_direction('+z')
         self.server.scene.add_grid('/ground', plane='xy', width=2, height=2)
@@ -70,9 +112,22 @@ class ReplayApp:
                              '\n\n23 joint targets, radians. Robot shows commanded positions. '
                              'Connect → Move to start → Play. Stop holds measured positions. '
                              f"Hand limit clipping: {self.data['hand_limit_clip_max_rad']:.6f} rad.")
+        offsets = ', '.join(f'J{index + 1} {value:+.4f}°'
+                            for index, value in enumerate(self.config.compensation.offsets_deg))
+        self.gui.add_markdown(f'**关节补偿来源**：{args.handeye or self.config.compensation_path}\n\n'
+                              f'**零点偏移**：{offsets}\n\n'
+                              '模型角用于显示，发送电机目标时应用方向和零点补偿；不会重复叠加偏移。')
         self.status = self.gui.add_text('Status', initial_value='Ready', disabled=True)
         self.frame = self.gui.add_slider('Frame', min=0, max=len(self.q)-1, step=1, initial_value=0)
         self.clock = self.gui.add_text('Trajectory time', initial_value='0.000 s', disabled=True)
+        with self.gui.add_folder('实时控制频率'):
+            self.gui.add_markdown('最近 1 秒成功下发的轨迹目标频率，每 0.25 秒刷新，目标为 30 Hz。'
+                                  '不是电机内部伺服频率或 CAN 总线帧率；保持阶段无新轨迹目标时显示 0 Hz，'
+                                  '不表示电机已失能。离线模拟会明确标注。')
+            self.arm_hz = self.gui.add_text('机械臂目标下发', initial_value='未连接', disabled=True)
+            self.hand_hz = self.gui.add_text('灵巧手目标下发', initial_value='未连接', disabled=True)
+        self.beam = BeamView(self.server, self.data, args.trajectory, self.config,
+                             handeye=args.handeye, pose_port=args.pose_port)
         for label, action in [('Connect hardware' if args.real else 'Connect mock robot', 'connect'),
                               ('Move to start (0.2 rad/s)', 'home'), ('Play once · 30 Hz', 'play'),
                               ('Stop / hold', 'stop')]:
@@ -96,11 +151,28 @@ class ReplayApp:
     def send(self, q):
         self.arm.command(self.config.compensation.to_motor(q[:7]))
         self.hand.command(q[7:])
+        self.hand_rate.mark()
         self.arm.update()
         state = self.arm.snapshot()
         if state['mode'] == 'fault':
             raise RuntimeError(state['error'])
+        self.arm_rate.mark()
         self.last_target = q.copy()
+
+    def refresh_rates(self, now=None):
+        now = time.monotonic() if now is None else now
+        if now - self.rates_shown < .25:
+            return
+        self.rates_shown = now
+        for device, counter, field in ((self.arm, self.arm_rate, self.arm_hz),
+                                       (self.hand, self.hand_rate, self.hand_hz)):
+            if device is None:
+                text = '未连接（离线预览）' if not self.args.real else '未连接'
+            else:
+                prefix = '实机' if self.args.real else '模拟'
+                text = f'{prefix} · {counter.hz(now):.1f} Hz'
+            if field.value != text:
+                field.value = text
 
     def hold(self):
         self.mode = 'idle'
@@ -136,6 +208,7 @@ class ReplayApp:
                 hand.close()
                 raise
             self.arm, self.hand = arm, hand
+            self.arm_rate, self.hand_rate = CommandRate(), CommandRate()
             self.status.value = 'Connected; holding current pose'
         elif action == 'home':
             if self.mode != 'idle':
@@ -166,6 +239,7 @@ class ReplayApp:
             self.draw(self.q[self.index])  # Preview only; never sends hardware commands.
 
     def tick(self):
+        self.beam.update(self.times[self.index])
         while not self.events.empty():
             self.action(self.events.get_nowait())
         if self.mode == 'home':
@@ -208,6 +282,7 @@ class ReplayApp:
                     except Exception as hold_error:
                         exc = RuntimeError(f'{exc}; hold: {hold_error}')
                     self.status.value = f'Error: {exc}'
+                self.refresh_rates()
                 deadline += 1/30
                 now = time.monotonic()
                 if now > deadline:
@@ -220,22 +295,32 @@ class ReplayApp:
             try:
                 self.hold()
             finally:
+                self.beam.close()
                 self.server.stop()
                 # Keep arm enabled and held on exit, as in the existing robot server.
                 # Hardware is disabled only through the user's existing control tools.
 
 
-def main():
+def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--trajectory', type=Path, default=Path(__file__).parent/'trajectory/joint_targets.json')
     p.add_argument('--config', type=Path, default=ROOT/'apps/control/config.yaml')
+    p.add_argument('--handeye', type=Path, help='Hand-eye result containing identified joint compensation')
+    p.add_argument('--pose-port', type=int, default=5711, help='Local UDP port for live beam tracking (display only)')
     p.add_argument('--host', default='127.0.0.1')
     p.add_argument('--port', type=int, default=8090)
     p.add_argument('--real', action='store_true')
     p.add_argument('--hand-port')
     p.add_argument('--hand-serial')
     p.add_argument('--hand-current', type=int, default=300, help='Hand current limit and goal current, mA')
-    ReplayApp(p.parse_args()).run()
+    args = p.parse_args(argv)
+    if args.real and args.handeye is None:
+        p.error('--handeye is required in real hardware mode; use the same calibration as step1 lift')
+    return args
+
+
+def main():
+    ReplayApp(parse_args()).run()
 
 
 if __name__ == '__main__':

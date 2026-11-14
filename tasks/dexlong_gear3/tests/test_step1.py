@@ -296,7 +296,9 @@ class BeamLiftRolloutTests(unittest.TestCase):
                                        pad_force=r['pad_force'][k].reshape(4, 3)*pe['tactile_force_scale'])
 
     def test_deployed_reference_matches_export(self):
-        self.assertEqual(load_reference(REFERENCES[self.STEP]), self.reference)
+        deployed = load_reference(REFERENCES[self.STEP])
+        self.assertEqual(deployed.pop('hand_target_speed_limit'), 1.5)
+        self.assertEqual(deployed, self.reference)  # Frozen rollout predates the command limiter.
         self.assertEqual(self.reference['task'], 'beam_lift_step1')
         self.assertEqual(sum(self.reference['policy_fields'].values()), 83)
         self.assertEqual(self.reference['pose_estimator']['axes'], 2)

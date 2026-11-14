@@ -49,6 +49,11 @@ class RecordingTests(unittest.TestCase):
         return app
 
     def test_manual_play_records_settling_and_stops_after_limit(self):
+        # Windows monotonic clock may not advance between synchronous mock ticks.
+        import itertools
+        clock = mock.patch('time.monotonic', side_effect=itertools.count(100., .001))
+        clock.start()
+        self.addCleanup(clock.stop)
         app = self.app()
         for trial in range(2):
             app.action('play')

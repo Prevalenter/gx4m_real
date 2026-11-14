@@ -139,6 +139,9 @@ class Step1Interface:
         # step2 0.1) for the fingers and arm_moving_average for the arm (older references have none: the arm uses the finger value).
         self.smoothing, self.arm_speed_scale, self.dt = r['act_moving_average'], c['arm_speed_scale'], r['step_dt']
         self.arm_smoothing = r.get('arm_moving_average', self.smoothing)
+        self.hand_target_speed_limit = r.get('hand_target_speed_limit')
+        if self.hand_target_speed_limit is not None and not 0 < self.hand_target_speed_limit < float('inf'):
+            raise ValueError('hand_target_speed_limit must be finite and positive')
         self.clip = r['clamp_abs_observations']
         self.p2p = r['p2p']
         # Goal yaw: turned with the object (yaw-free), snapped to whole teeth, or exact (no symmetry, the beam).
@@ -314,6 +317,9 @@ class Step1Interface:
         fingers = self.lower[7:] + .5*(a[7:] + 1)*(self.upper[7:] - self.lower[7:])
         arm = self.arm_smoothing*arm + (1 - self.arm_smoothing)*self.targets[:7]
         fingers = self.smoothing*fingers + (1 - self.smoothing)*self.targets[7:]
+        if self.hand_target_speed_limit is not None:
+            delta = self.hand_target_speed_limit*self.dt
+            fingers = self.targets[7:] + np.clip(fingers - self.targets[7:], -delta, delta)
         self.targets = np.clip(np.concatenate((arm, fingers)), self.lower, self.upper)
         return self.targets.copy()
 

@@ -95,6 +95,10 @@ class ReplayApp:
         from viser.extras import ViserUrdf
         self.args = args
         reference = json.loads(Path(args.reference).read_text(encoding='utf-8'))
+        limit = reference.get('hand_target_speed_limit')
+        self.hand_target_speed_limit = 1.5 if limit is None else float(limit)
+        if not 0 < self.hand_target_speed_limit < float('inf'):
+            raise ValueError('hand_target_speed_limit must be finite and positive')
         self.config = replay_config(args.config, args.handeye, reference, args.arm_velocity)
         self.data, self.times, self.q = load_targets(args.trajectory, self.config)
         self.arm = self.hand = None
@@ -172,8 +176,13 @@ class ReplayApp:
         return np.r_[self.config.compensation.to_model(state['positions']), self.hand.read()]
 
     def send(self, q):
+        q = np.asarray(q, dtype=float).copy()
+        hz = self.play_hz if self.mode == 'play' else 30
+        delta = self.hand_target_speed_limit / hz
+        q[7:] = self.last_target[7:] + np.clip(q[7:] - self.last_target[7:], -delta, delta)
         self.arm.command(self.config.compensation.to_motor(q[:7]))
         self.hand.command(q[7:])
+        self.last_target = q.copy()  # Record the limited command actually sent, even if the arm update faults.
         self.hand_rate.mark()
         self.arm.update()
         state = self.arm.snapshot()
@@ -240,6 +249,7 @@ class ReplayApp:
                 hand.close()
                 raise
             self.arm, self.hand = arm, hand
+            self.last_target = self.measured().copy()
             self.arm_rate, self.hand_rate = CommandRate(), CommandRate()
             self.status.value = 'Connected; holding current pose'
         elif action == 'home':
@@ -248,6 +258,7 @@ class ReplayApp:
             if self.arm is None:
                 raise RuntimeError('Connect first')
             self.home_q = self.measured()
+            self.last_target = self.home_q.copy()
             self.home_deadline = time.monotonic() + float(np.max(np.abs(self.home_q-self.q[0])))/.2 + 10
             self.mode = 'home'
             self.index = 0
@@ -264,13 +275,13 @@ class ReplayApp:
                 q = self.measured()
                 if not self.at_start(q):
                     raise RuntimeError('Robot is not at the first target; Move to start first')
+                self.last_target = q.copy()
             play_hz = 10 if action == 'play10' else 30
             if self.recorder is not None:
                 if self.args.real and (self.beam.latest is None or
                                        time.monotonic() - self.beam.latest[0] > .2):
                     raise RuntimeError('Recording needs a fresh beam pose (within 200 ms); check perception')
                 self.recorder.start(play_hz)
-                self.last_target = self.q[0].copy()
                 self.recorder.sample(self, 0.)
                 self.record_status.value = self.recorder.status
             self.index = 0
@@ -305,9 +316,12 @@ class ReplayApp:
                 self.send(q)
             if self.recorder is not None:
                 self.recorder.sample(self, self.times[self.index], command_time)
-            self.draw(q)
+            self.draw(self.last_target if self.arm is not None else q)
             self.frame.value = self.index
             if self.index == len(self.q)-1:
+                # Finish ramping to the last recorded target before starting the settling timer.
+                if self.arm is not None and not np.allclose(self.last_target[7:], q[7:], atol=1e-8, rtol=0.):
+                    return
                 if self.recorder is not None:
                     self.mode = 'settle'
                     self.tail_deadline = time.monotonic() + self.args.record_tail

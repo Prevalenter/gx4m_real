@@ -1,10 +1,13 @@
 {
-  "checkpoint": "logs\\rsl_rl\\gx4m_dexlong_beam_step1_lift\\2026-11-13_13-58-15\\model_1500.pt",
-  "environment": 43,
-  "steps": 134,
-  "success": true,
+  "checkpoint": "logs\\rsl_rl\\gx4m_dexlong_beam_step1_lift\\2026-11-13_21-54-02\\model_750.pt",
+  "environment": 4,
+  "steps": 300,
+  "success": false,
   "success_definition": "task retracted flag (lift goal reached)",
-  "nominal_evaluation": false,
+  "nominal_evaluation": true,
+  "noise_enabled": false,
+  "domain_randomization": false,
+  "hand_target_speed_limit": 1.5,
   "nominal_mass_kg": 0.1,
   "mass_scale_range": [
     0.5,
@@ -14,5 +17,19 @@
     0.1,
     0.3
   ],
-  "dt": 0.03333333333333333
+  "dt": 0.03333333333333333,
+  "max_rise_m": 0.2161225974559784,
+  "hand_limit_clip_max_rad": 0.0,
+  "checkpoint_sha256": "5ce24395e46d5048241cb555cecded420f6e5b6c0f7db0613a7e38266f0359a1",
+  "noise_settings": {
+    "domain_randomization": false,
+    "rna": false,
+    "target_noise_deg": 0,
+    "reset_position_noise": 0,
+    "object_size_dr": false,
+    "random_wrench": false,
+    "occlusion": false,
+    "random_track_loss": 0,
+    "tactile_noise_std": 0
+  }
 }

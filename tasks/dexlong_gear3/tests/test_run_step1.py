@@ -101,6 +101,19 @@ class Step1RunnerTests(unittest.TestCase):
         runner.log = mock.Mock()
         return runner
 
+    def test_beam_policy_limits_first_command_from_measured_pose(self):
+        runner = self.lift_runner()
+        measured = np.asarray(runner.iface.ref['initial_joint_pos']).copy()
+        measured[7:] = np.clip(measured[7:] + .08, runner.iface.lower[7:], runner.iface.upper[7:])
+        runner.joints.return_value = measured
+        runner.actor.return_value = np.ones(23)
+        outcome, rows = runner.episode(max_steps=3)
+        self.assertEqual(outcome, 'max_steps')
+        previous = measured
+        for row in rows:
+            self.assertLessEqual(np.abs(row['targets'][7:]-previous[7:]).max(), 1.5*runner.iface.dt+1e-12)
+            previous = row['targets']
+
     def test_lift_drop_continues_until_operator_stop(self):
         runner = self.lift_runner()
         runner.iface.update = mock.Mock(return_value=dict(outcome=None, stage=0, distance=.1, away=.1, dropped=True))

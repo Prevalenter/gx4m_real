@@ -26,7 +26,8 @@ class ReplayRecorder:
             if source.is_file():
                 shutil.copy2(source, reference/source.name)
                 hashes[source.name] = hashlib.sha256(source.read_bytes()).hexdigest()
-        for name, source in (('control_config', args.config), ('handeye', args.handeye)):
+        for name, source in (('control_config', args.config), ('handeye', args.handeye),
+                             ('policy_reference', args.reference)):
             if source is not None:
                 source = Path(source)
                 shutil.copy2(source, reference/(name + source.suffix))

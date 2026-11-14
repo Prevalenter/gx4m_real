@@ -321,14 +321,15 @@ class Step1Runner:
     def episode(self, max_steps=None):
         """One policy episode from the start pose; returns (outcome, per-step log)."""
         iface = self.iface
+        initial_joints = self.joints()
         if iface.lift is not None:
             # The lift goal is above where the part rests now (as in training, from the pose at the reset).
-            T, _ = self.gear_pose(self.joints())
+            T, _ = self.gear_pose(initial_joints)
             if T is None:
                 return 'pose_lost', []
-            iface.reset(object_pose=(T[:3, 3], matrix_quat(T[:3, :3])))
+            iface.reset(targets=initial_joints, object_pose=(T[:3, 3], matrix_quat(T[:3, :3])))
         else:
-            iface.reset()
+            iface.reset(targets=initial_joints)
         self.actor.reset()
         rows, result, outcome = [], None, None
         drop_reported = False

@@ -1,5 +1,6 @@
 {
  "task": "beam_lift_step1",
+ "hand_target_speed_limit": 1.5,
  "checkpoint": "E:\\work\\gx4max\\gx4m_learning\\logs\\rsl_rl\\gx4m_dexlong_beam_step1_lift\\2026-11-12_18-39-14\\model_10000.pt",
  "joint_order": [
   "joint1",

@@ -40,13 +40,15 @@ class CompensationTests(unittest.TestCase):
         path = ROOT/'tasks/beam_lift_replay/trajectory/joint_targets.json'
         _, times, positions = load_targets(path, config)
         source = json.loads(path.read_text())
-        self.assertEqual(positions.shape, (155, 23))
+        self.assertEqual(positions.shape, (int(np.ceil(source['times_sec'][-1]*30))+1, 23))
         np.testing.assert_allclose(positions[0, :7], source['positions_rad'][0][:7])
         np.testing.assert_allclose(positions[-1, :7], source['positions_rad'][-1][:7])
-        self.assertAlmostEqual(times[-1], 154/30)
+        self.assertAlmostEqual(times[-1], (len(positions)-1)/30)
 
     def test_send_and_measured_apply_compensation_once(self):
         app = ReplayApp.__new__(ReplayApp)
+        app.mode, app.play_hz, app.hand_target_speed_limit = 'play', 30, 1.5
+        app.last_target = np.zeros(23)
         app.config = replay_config(self.config_path, self.path)
         app.arm, app.hand = mock.Mock(), mock.Mock()
         app.arm_rate, app.hand_rate = CommandRate(), CommandRate()
@@ -149,6 +151,8 @@ class CommandRateTests(unittest.TestCase):
 
     def test_hand_success_is_counted_when_arm_update_faults(self):
         app = self.app(real=True)
+        app.mode, app.play_hz, app.hand_target_speed_limit = 'play', 30, 1.5
+        app.last_target = np.zeros(23)
         app.config = load_config(ROOT/'apps/control/config.yaml')
         app.arm, app.hand = mock.Mock(), mock.Mock()
         app.arm.snapshot.return_value = {'mode': 'fault', 'error': 'test fault'}
@@ -159,6 +163,8 @@ class CommandRateTests(unittest.TestCase):
 
     def test_failed_hand_command_does_not_count_success(self):
         app = self.app(real=True)
+        app.mode, app.play_hz, app.hand_target_speed_limit = 'play', 30, 1.5
+        app.last_target = np.zeros(23)
         app.config = load_config(ROOT/'apps/control/config.yaml')
         app.arm, app.hand = mock.Mock(), mock.Mock()
         app.hand.command.side_effect = RuntimeError('serial failure')
@@ -192,8 +198,9 @@ class BeamViewTests(unittest.TestCase):
         self.assertTrue(view.recorded.visible)
         with np.load(self.trajectory.with_name('contact_force.npz')) as archive:
             first, last = archive['object_pos_m'][0], archive['object_pos_m'][-1]
+            end_time = float(archive['time_s'][-1])
         np.testing.assert_allclose(view.recorded.position, first)
-        view.update(6.)
+        view.update(end_time + 1.)
         np.testing.assert_allclose(view.recorded.position, last)
         view.show_start.value = view.show_recorded.value = False
         view.update(0.)

@@ -1,0 +1,22 @@
+{
+  "checkpoint": "logs\\rsl_rl\\gx4m_dexlong_beam_step1_lift\\2026-11-15_02-23-23\\model_1250.pt",
+  "environment": 48,
+  "steps": 134,
+  "success": true,
+  "success_definition": "object height rise >= 0.15 m",
+  "success_height_threshold_m": 0.15,
+  "nominal_evaluation": true,
+  "noise_enabled": false,
+  "domain_randomization": false,
+  "hand_target_speed_limit": 1.5,
+  "nominal_mass_kg": 0.12,
+  "mass_scale_range": [
+    0.5,
+    1.8
+  ],
+  "pla_friction_range": [
+    0.1,
+    0.3
+  ],
+  "dt": 0.03333333333333333
+}

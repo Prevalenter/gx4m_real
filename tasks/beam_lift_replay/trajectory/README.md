@@ -1,9 +1,9 @@
-# Noise-free model_750 replay
+# Noise-free model_1250 replay
 
-Checkpoint: 2026-11-13_21-54-02/model_750.pt.
-1200 source frames at 120 Hz; 9.991667 seconds.
-Maximum rise: 21.61 cm. Full task success: false (episode timed out).
-Noise and domain randomization disabled; nominal object mass 0.1 kg.
+Checkpoint: 2026-11-15_02-23-23/model_1250.pt.
+536 source frames at 120 Hz; 4.458333 seconds.
+Maximum rise: 16.08 cm. Height-threshold success: True (threshold 15 cm).
+Noise and domain randomization disabled; nominal object mass 0.12 kg.
 Hand command slew limit: 1.5 rad/s.
 Hardware-limit clipping max: 0.00000000 rad.
-Original commands remain in joint_targets.npz; JSON raw_positions_rad if clipped.
+Validated with gx4m_real replay loader, including compensated arm limits.

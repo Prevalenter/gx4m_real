@@ -1,11 +1,15 @@
-# Noise-free model_1250 replay (envelope grasp, 100 mm H stand)
+# Noise-free beam_step1 model_15750 replay (lift, carry, insert into the part 2 fixture)
 
-Checkpoint: 2026-11-18_06-34-22/model_1250.pt (beam_step1_lift, envelope two-phase grasp).
-1256 source frames at 120 Hz; 10.458333 seconds (314 policy steps at 30 Hz).
-Acceptance: beam rise >= 10 cm (--min-rise 0.10), not the task success flag; maximum rise 21.57 cm.
-The beam slips about 2.7 cm in the last ~0.3 s before the episode ends (final rise ~19.1 cm).
-Noise and domain randomization disabled; nominal object mass 0.12 kg.
+Checkpoint: 2026-11-19_00-51-14/model_15750.pt (beam_step1: envelope grasp on the 100 mm H stand, arm carry to the
+pre-insert pose, then straight down into the part 2 fixture).
+1484 source frames at 120 Hz; 12.358333 seconds (371 policy steps at 30 Hz).
+Acceptance: the task success flag (p2p_state.retracted: final-pose keypoints within 15 mm for 10 steps).
+At the end the beam origin is 10.0 mm from the fully seated pose (9.6 mm high): about 28 mm into the 37.5 mm
+pre-insert -> final travel, not bottomed out. Maximum rise 9.5 cm.
+Noise and domain randomization disabled; nominal beam size; nominal object mass 0.12 kg.
 Hand command slew limit: 1.5 rad/s.
 Hardware-limit clipping max: 0.00000000 rad.
-Validated with gx4m_real replay loader, including compensated arm limits.
-The beam starts on the 100 mm H stand (asset/beam_stand/h_stand.stl in gx4m_learning).
+Validated with gx4m_real replay loader, including compensated arm limits (he_20261109_contact_plate).
+Beam start: on the 100 mm H stand (asset/beam_stand/h_stand.stl in gx4m_learning), yaw +16 deg.
+Fixture: part 2 insertion fixture at (0.2259, -0.2016, 0.212) m in the robot base frame
+(experiment/dexlong_beam_assembly/step1/initial_pose_sim2real.json in gx4m_learning).
